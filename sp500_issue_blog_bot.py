@@ -8,11 +8,13 @@ import re
 import time
 from dataclasses import dataclass, asdict
 from datetime import date, datetime, timedelta
+from io import StringIO
 from typing import Iterable
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import requests
 import schedule
 import yfinance as yf
 from dotenv import load_dotenv
@@ -69,7 +71,29 @@ def clean_ticker_for_yfinance(ticker: str) -> str:
 
 
 def get_sp500_tickers(limit: int | None = None) -> list[str]:
-    tables = pd.read_html(SP500_WIKI_URL)
+    configured_tickers = os.getenv("SP500_TICKERS", "").strip()
+    if configured_tickers:
+        tickers = [
+            clean_ticker_for_yfinance(ticker)
+            for ticker in configured_tickers.split(",")
+            if ticker.strip()
+        ]
+        return tickers[:limit] if limit else tickers
+
+    response = requests.get(
+        SP500_WIKI_URL,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (compatible; stockncompany-blog-bot/1.0; "
+                "+https://github.com/)"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+
+    tables = pd.read_html(StringIO(response.text))
     constituents = tables[0]
     tickers = [clean_ticker_for_yfinance(t) for t in constituents["Symbol"].tolist()]
     return tickers[:limit] if limit else tickers

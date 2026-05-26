@@ -17,13 +17,39 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: "pip"
+
+      - name: Validate required secrets
+        shell: python
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          GOOGLE_CLIENT_SECRET_JSON: ${{ secrets.GOOGLE_CLIENT_SECRET_JSON }}
+          GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
+        run: |
+          import os
+
+          missing = [
+              name
+              for name in (
+                  "OPENAI_API_KEY",
+                  "BLOGGER_BLOG_ID",
+                  "GOOGLE_CLIENT_SECRET_JSON",
+                  "GOOGLE_TOKEN_JSON",
+              )
+              if not os.environ.get(name, "").strip()
+          ]
+
+          if missing:
+              raise SystemExit(
+                  "Missing required GitHub Secrets: " + ", ".join(missing)
+              )
 
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
@@ -62,6 +88,7 @@ jobs:
           PUBLISH_STATUS: ${{ vars.PUBLISH_STATUS || 'draft' }}
           MAX_COMPANIES: ${{ vars.MAX_COMPANIES || '3' }}
           SCAN_LIMIT: ${{ vars.SCAN_LIMIT }}
+          SP500_TICKERS: ${{ vars.SP500_TICKERS }}
           SKIP_IF_NO_ISSUES: ${{ vars.SKIP_IF_NO_ISSUES || 'true' }}
           GOOGLE_CLIENT_SECRET_FILE: "client_secret.json"
           GOOGLE_TOKEN_FILE: "token.json"

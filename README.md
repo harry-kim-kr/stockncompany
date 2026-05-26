@@ -39,14 +39,21 @@ GOOGLE_TOKEN_JSON
 
 ```text
 OPENAI_MODEL=gpt-4o
+OPENAI_TEMPERATURE=0.45
 PUBLISH_STATUS=draft
 MAX_COMPANIES=3
 SCAN_LIMIT=
 SKIP_IF_NO_ISSUES=true
+AUTO_GENERATE_LABELS=true
+MAX_BLOGGER_LABELS=10
 BLOGGER_LABELS=S&P 500,US Stocks,Wall Street,Earnings
 ```
 
 처음에는 `PUBLISH_STATUS=draft`로 며칠 확인한 뒤, 자동 발행이 충분히 안정적이면 `publish`로 바꾸는 편이 좋습니다.
+
+`AUTO_GENERATE_LABELS=true`이면 글 내용과 수집된 기업 데이터를 바탕으로 SEO 라벨을 자동 생성합니다. `BLOGGER_LABELS`는 자동 라벨 생성에 실패하거나 `AUTO_GENERATE_LABELS=false`일 때만 사용됩니다.
+
+본문 작성 프롬프트는 수집 데이터에 없는 실적 수치, 목표주가, 애널리스트 이름, 은행명, 전망을 임의로 만들지 않도록 제한되어 있습니다. 데이터에 없는 내용은 확인 필요 또는 시나리오 관점으로만 다루게 됩니다.
 
 ## 5. 자동 실행
 

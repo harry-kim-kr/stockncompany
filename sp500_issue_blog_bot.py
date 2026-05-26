@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 import logging
 import os
 import re
@@ -271,6 +272,13 @@ At the start of each company section, insert the collected logo_url as a raw HTM
 Example:
 <img src="LOGO_URL" alt="Company Name logo" width="120" style="margin-bottom:10px;"><br>
 
+Factual accuracy rules:
+- Use only the supplied data as confirmed facts.
+- Do not invent analyst names, banks, price targets, earnings numbers, revenue numbers, guidance, dates, or stock moves that are not present in the data.
+- If a detail is not in the data, say that investors should verify the next official filing, earnings release, or analyst note instead of filling in the gap.
+- Separate confirmed facts from interpretation. Label interpretation as market context, possible scenario, or risk point.
+- Do not imply that yfinance data is an official company filing.
+
 Structure:
 1. Title: combine a high-search-volume company name with curiosity, e.g. "Tesla Price Target Jumps: Why Wall Street Is Moving Again"
 2. Opening: summarize today's hottest S&P 500 earnings or analyst-rating stories.
@@ -282,6 +290,7 @@ Constraints:
 - Do not sound like generic AI copy.
 - Write at least 1,500 English words excluding spaces.
 - Do not present this as personalized investment advice. Include risk controls and scenario thinking.
+- Avoid unsupported predictions. Use scenario-based language such as "if momentum holds" or "if the company confirms".
 - Return Markdown only.
 
 Data:
@@ -299,13 +308,95 @@ def generate_blog_post(issues: list[CompanyIssue]) -> str:
         messages=[
             {
                 "role": "system",
-                "content": "You write polished English financial blog posts with SEO-aware structure.",
+                "content": (
+                    "You write polished English financial blog posts with SEO-aware structure. "
+                    "You never fabricate market facts, figures, analyst actions, or sources."
+                ),
             },
             {"role": "user", "content": build_prompt(issues)},
         ],
-        temperature=0.75,
+        temperature=float(os.getenv("OPENAI_TEMPERATURE", "0.45")),
     )
     return response.choices[0].message.content.strip()
+
+
+def fallback_blogger_labels(issues: list[CompanyIssue]) -> list[str]:
+    labels = ["S&P 500", "US Stocks", "Wall Street"]
+
+    for issue in issues:
+        labels.append(issue.ticker)
+        labels.append(issue.company_name)
+        labels.append(issue.issue_type)
+
+    deduped = []
+    for label in labels:
+        cleaned = sanitize_label(label)
+        if cleaned and cleaned not in deduped:
+            deduped.append(cleaned)
+    return deduped[: int(os.getenv("MAX_BLOGGER_LABELS", "10"))]
+
+
+def sanitize_label(label: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(label)).strip()
+    cleaned = cleaned.strip(".,;:|/#")
+    return cleaned[:80]
+
+
+def generate_blogger_labels(markdown_text: str, issues: list[CompanyIssue]) -> list[str]:
+    if os.getenv("AUTO_GENERATE_LABELS", "true").lower() != "true":
+        configured = [
+            sanitize_label(label)
+            for label in os.getenv("BLOGGER_LABELS", "S&P 500,US Stocks,Wall Street,Earnings").split(",")
+        ]
+        return [label for label in configured if label]
+
+    max_labels = int(os.getenv("MAX_BLOGGER_LABELS", "10"))
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    prompt = f"""
+Create SEO-friendly Google Blogger labels for this English stock-market article.
+
+Rules:
+- Return JSON only with this schema: {{"labels": ["label 1", "label 2"]}}
+- Produce 6 to {max_labels} labels.
+- Labels must be based only on companies, tickers, sectors, and confirmed topics present in the article or source data.
+- Do not invent companies, analysts, banks, events, or themes.
+- Prefer concise search-friendly labels such as "Nvidia Stock", "Earnings", "S&P 500", "Analyst Ratings".
+- Do not include clickbait, sentences, hashtags, or unsupported keywords.
+- Keep each label under 80 characters.
+
+Source data:
+{[asdict(issue) for issue in issues]}
+
+Article:
+{markdown_text[:8000]}
+""".strip()
+
+    try:
+        response = client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o"),
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You create factual SEO labels and return strict JSON only.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+        payload = json.loads(response.choices[0].message.content)
+        labels = payload.get("labels", [])
+    except Exception as exc:
+        logging.warning("Dynamic label generation failed. Using fallback labels. Error: %s", exc)
+        return fallback_blogger_labels(issues)
+
+    cleaned_labels = []
+    for label in labels:
+        cleaned = sanitize_label(label)
+        if cleaned and cleaned not in cleaned_labels:
+            cleaned_labels.append(cleaned)
+
+    return (cleaned_labels or fallback_blogger_labels(issues))[:max_labels]
 
 
 def markdown_to_blogger_html(markdown_text: str) -> str:
@@ -351,15 +442,10 @@ def get_blogger_service():
     return build("blogger", "v3", credentials=creds)
 
 
-def upload_to_blogger(markdown_text: str) -> dict:
+def upload_to_blogger(markdown_text: str, labels: list[str]) -> dict:
     blog_id = os.environ["BLOGGER_BLOG_ID"]
     title = extract_title(markdown_text)
     html_content = markdown_to_blogger_html(markdown_text)
-    labels = [
-        label.strip()
-        for label in os.getenv("BLOGGER_LABELS", "S&P 500,US Stocks,Wall Street,Earnings").split(",")
-        if label.strip()
-    ]
     is_draft = os.getenv("PUBLISH_STATUS", "draft").lower() != "publish"
 
     body = {
@@ -383,11 +469,11 @@ def upload_to_blogger(markdown_text: str) -> dict:
     )
 
 
-def upload_blog_post(markdown_text: str) -> dict:
+def upload_blog_post(markdown_text: str, labels: list[str]) -> dict:
     platform = os.getenv("BLOG_PLATFORM", "blogger").lower()
 
     if platform == "blogger":
-        return upload_to_blogger(markdown_text)
+        return upload_to_blogger(markdown_text, labels)
 
     output_path = os.getenv("LOCAL_OUTPUT_PATH", "latest_sp500_issue_post.md")
     with open(output_path, "w", encoding="utf-8") as file:
@@ -413,7 +499,9 @@ def run_once() -> None:
         return
 
     post = generate_blog_post(issues)
-    result = upload_blog_post(post)
+    labels = generate_blogger_labels(post, issues)
+    logging.info("Blogger labels: %s", labels)
+    result = upload_blog_post(post, labels)
     logging.info("Upload result: %s", html.escape(str(result))[:500])
 
 

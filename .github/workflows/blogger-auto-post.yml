@@ -53,8 +53,11 @@ jobs:
           RUN_NOW: "true"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4o' }}
+          OPENAI_TEMPERATURE: ${{ vars.OPENAI_TEMPERATURE || '0.45' }}
           BLOG_PLATFORM: "blogger"
           BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          AUTO_GENERATE_LABELS: ${{ vars.AUTO_GENERATE_LABELS || 'true' }}
+          MAX_BLOGGER_LABELS: ${{ vars.MAX_BLOGGER_LABELS || '10' }}
           BLOGGER_LABELS: ${{ vars.BLOGGER_LABELS || 'S&P 500,US Stocks,Wall Street,Earnings' }}
           PUBLISH_STATUS: ${{ vars.PUBLISH_STATUS || 'draft' }}
           MAX_COMPANIES: ${{ vars.MAX_COMPANIES || '3' }}

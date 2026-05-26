@@ -1,0 +1,10 @@
+yfinance>=0.2.40
+pandas>=2.2.0
+lxml>=5.2.0
+python-dotenv>=1.0.1
+openai>=1.30.0
+schedule>=1.2.2
+markdown>=3.6
+google-api-python-client>=2.130.0
+google-auth-oauthlib>=1.2.0
+google-auth-httplib2>=0.2.0

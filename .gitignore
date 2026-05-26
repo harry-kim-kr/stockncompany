@@ -1,0 +1,7 @@
+.env
+client_secret.json
+token.json
+*.pyc
+__pycache__/
+.pytest_cache/
+latest_sp500_issue_post.md

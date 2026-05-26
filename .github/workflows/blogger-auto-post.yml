@@ -2,9 +2,12 @@ name: Blogger Auto Post
 
 on:
   schedule:
-    # 07:30 Korea Standard Time = 22:30 UTC on the previous day.
-    - cron: "30 22 * * *"
+    # Monday-Friday near 07:00 KST. 06:50 KST = Sunday-Thursday 21:50 UTC.
+    - cron: "50 21 * * 0-4"
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 concurrency:
   group: blogger-auto-post
@@ -13,7 +16,7 @@ concurrency:
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -45,11 +48,8 @@ jobs:
               )
               if not os.environ.get(name, "").strip()
           ]
-
           if missing:
-              raise SystemExit(
-                  "Missing required GitHub Secrets: " + ", ".join(missing)
-              )
+              raise SystemExit("Missing required GitHub Secrets: " + ", ".join(missing))
 
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
@@ -63,33 +63,46 @@ jobs:
           import os
           from pathlib import Path
 
-          required = {
-              "GOOGLE_CLIENT_SECRET_JSON": "client_secret.json",
-              "GOOGLE_TOKEN_JSON": "token.json",
-          }
+          Path("client_secret.json").write_text(os.environ["GOOGLE_CLIENT_SECRET_JSON"].strip(), encoding="utf-8")
+          Path("token.json").write_text(os.environ["GOOGLE_TOKEN_JSON"].strip(), encoding="utf-8")
 
-          for secret_name, output_name in required.items():
-              value = os.environ.get(secret_name, "").strip()
-              if not value:
-                  raise SystemExit(f"Missing GitHub secret: {secret_name}")
-              Path(output_name).write_text(value, encoding="utf-8")
-
-      - name: Run Blogger auto post
+      - name: Run RSS Blogger auto post
         env:
           RUN_NOW: "true"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4o' }}
-          OPENAI_TEMPERATURE: ${{ vars.OPENAI_TEMPERATURE || '0.45' }}
-          BLOG_PLATFORM: "blogger"
-          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
-          AUTO_GENERATE_LABELS: ${{ vars.AUTO_GENERATE_LABELS || 'true' }}
-          MAX_BLOGGER_LABELS: ${{ vars.MAX_BLOGGER_LABELS || '10' }}
-          BLOGGER_LABELS: ${{ vars.BLOGGER_LABELS || 'S&P 500,US Stocks,Wall Street,Earnings' }}
+          OPENAI_MODEL: "gpt-4o-mini"
+          OPENAI_TEMPERATURE: ${{ vars.OPENAI_TEMPERATURE || '0.2' }}
+          MAX_OPENAI_OUTPUT_TOKENS: ${{ vars.MAX_OPENAI_OUTPUT_TOKENS || '700' }}
+          RSS_FEED_URLS: ${{ vars.RSS_FEED_URLS }}
+          MAX_ARTICLE_CHARS: ${{ vars.MAX_ARTICLE_CHARS || '2500' }}
+          MAX_SUMMARY_INPUT_CHARS: ${{ vars.MAX_SUMMARY_INPUT_CHARS || '1200' }}
+          MAX_RELATED_LINKS: ${{ vars.MAX_RELATED_LINKS || '3' }}
+          MAX_POSTS_PER_RUN: ${{ vars.MAX_POSTS_PER_RUN || '1' }}
+          DRY_RUN: ${{ vars.DRY_RUN || 'false' }}
           PUBLISH_STATUS: ${{ vars.PUBLISH_STATUS || 'draft' }}
-          MAX_COMPANIES: ${{ vars.MAX_COMPANIES || '3' }}
-          SCAN_LIMIT: ${{ vars.SCAN_LIMIT }}
-          SP500_TICKERS: ${{ vars.SP500_TICKERS }}
-          SKIP_IF_NO_ISSUES: ${{ vars.SKIP_IF_NO_ISSUES || 'true' }}
+          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
           GOOGLE_CLIENT_SECRET_FILE: "client_secret.json"
           GOOGLE_TOKEN_FILE: "token.json"
         run: python sp500_issue_blog_bot.py
+
+      - name: Upload DRY_RUN output
+        if: ${{ vars.DRY_RUN == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dry-run-output
+          path: output/
+          if-no-files-found: ignore
+
+      - name: Commit history and run summary
+        if: ${{ vars.DRY_RUN != 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          test -f history.json && git add history.json
+          test -f run_summary.json && git add run_summary.json
+          if git diff --cached --quiet; then
+            echo "No history changes to commit."
+          else
+            git commit -m "chore: update auto post history [skip ci]"
+            git push
+          fi

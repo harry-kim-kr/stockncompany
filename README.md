@@ -1,28 +1,27 @@
-# S&P 500 Issue Blog Bot
+# RSS Blogger Auto Post Bot
 
-매일 한국 시간 오전 7시 30분에 S&P 500 기업 중 실적 발표 또는 투자의견/목표주가 변경 이슈가 있는 2~3개 기업을 추려 OpenAI API로 영문 SEO형 글을 만들고 Google Blogger에 업로드합니다.
+월-금 한국 시간 오전 7시 전후에 RSS 뉴스를 수집하고, 중복을 먼저 차단한 뒤, `gpt-4o-mini` 1회 호출로 SEO용 JSON 데이터를 받아 Python HTML 템플릿과 조립해 Google Blogger에 업로드합니다.
 
-## 1. 로컬 설치
+## 핵심 구조
+
+- 하루 최대 1개 포스팅: `MAX_POSTS_PER_RUN=1`
+- 저비용 모델 고정: `gpt-4o-mini`
+- 기사 1건당 OpenAI API 최대 1회 호출
+- OpenAI는 긴 HTML을 만들지 않고 JSON만 반환
+- Python이 FAQ, 핵심요약 박스, 인사이트 박스, 내부 링크가 포함된 최종 HTML 템플릿을 조립
+- 중복 기준: RSS GUID, 기사 URL, 기사 제목 중 하나라도 일치하면 API 호출 전 스킵
+- `history.json` 기반으로 같은 카테고리 또는 같은 티커의 과거 글을 본문 하단에 자동 연결
+- 발행 성공 후 `history.json`, `run_summary.json`을 GitHub Actions가 자동 Commit & Push
+
+## 설치
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 2. Blogger API 준비
+## GitHub Secrets
 
-Google Cloud Console에서 Blogger API를 활성화한 뒤 OAuth Client JSON을 내려받아 `client_secret.json`으로 저장하세요.
-
-로컬에서 한 번 실행해 Google 로그인을 완료하면 `token.json`이 생성됩니다.
-
-```bash
-RUN_NOW=true python sp500_issue_blog_bot.py
-```
-
-GitHub Actions는 브라우저 로그인을 할 수 없기 때문에, 이 `token.json`을 GitHub Secret으로 저장해야 합니다.
-
-## 3. GitHub Secrets
-
-GitHub 저장소에서 `Settings` -> `Secrets and variables` -> `Actions`로 이동해 아래 Secrets를 추가하세요.
+GitHub 저장소 `Settings` -> `Secrets and variables` -> `Actions`에서 아래 Secrets를 추가하세요.
 
 ```text
 OPENAI_API_KEY
@@ -31,56 +30,84 @@ GOOGLE_CLIENT_SECRET_JSON
 GOOGLE_TOKEN_JSON
 ```
 
-`GOOGLE_CLIENT_SECRET_JSON`에는 `client_secret.json` 전체 내용을 넣고, `GOOGLE_TOKEN_JSON`에는 `token.json` 전체 내용을 넣습니다.
+## GitHub Variables
 
-## 4. GitHub Variables
-
-같은 화면의 `Variables` 탭에는 아래 값을 필요에 따라 추가하세요. 추가하지 않으면 워크플로우 기본값을 사용합니다.
+필수:
 
 ```text
-OPENAI_MODEL=gpt-4o
-OPENAI_TEMPERATURE=0.45
+RSS_FEED_URLS=https://example.com/feed.xml,https://example.com/rss
+```
+
+권장 기본값:
+
+```text
+OPENAI_TEMPERATURE=0.2
+MAX_OPENAI_OUTPUT_TOKENS=700
+MAX_ARTICLE_CHARS=2500
+MAX_SUMMARY_INPUT_CHARS=1200
+MAX_RELATED_LINKS=3
+MAX_POSTS_PER_RUN=1
+DRY_RUN=true
 PUBLISH_STATUS=draft
-MAX_COMPANIES=3
-SCAN_LIMIT=
-SKIP_IF_NO_ISSUES=true
-AUTO_GENERATE_LABELS=true
-MAX_BLOGGER_LABELS=10
-BLOGGER_LABELS=S&P 500,US Stocks,Wall Street,Earnings
 ```
 
-처음에는 `PUBLISH_STATUS=draft`로 며칠 확인한 뒤, 자동 발행이 충분히 안정적이면 `publish`로 바꾸는 편이 좋습니다.
+`OPENAI_MODEL`은 워크플로우에서 `gpt-4o-mini`로 고정되어 있습니다.
 
-`AUTO_GENERATE_LABELS=true`이면 글 내용과 수집된 기업 데이터를 바탕으로 SEO 라벨을 자동 생성합니다. `BLOGGER_LABELS`는 자동 라벨 생성에 실패하거나 `AUTO_GENERATE_LABELS=false`일 때만 사용됩니다.
+## DRY_RUN 테스트
 
-본문 작성 프롬프트는 수집 데이터에 없는 실적 수치, 목표주가, 애널리스트 이름, 은행명, 전망을 임의로 만들지 않도록 제한되어 있습니다. 데이터에 없는 내용은 확인 필요 또는 시나리오 관점으로만 다루게 됩니다.
-
-## 5. 자동 실행
-
-워크플로우 파일은 `.github/workflows/blogger-auto-post.yml`에 들어 있습니다.
-
-자동 실행 시간:
+처음에는 GitHub Variables에서 아래처럼 설정하세요.
 
 ```text
-매일 한국 시간 07:30
+DRY_RUN=true
+PUBLISH_STATUS=draft
 ```
 
-GitHub Actions의 cron은 UTC 기준이라 워크플로우에는 `30 22 * * *`로 설정되어 있습니다.
+GitHub `Actions` 탭에서 `Blogger Auto Post` -> `Run workflow`를 실행하면 Blogger 업로드는 하지 않고 `output/` 폴더에 완성 HTML과 AI JSON 결과를 저장합니다. 워크플로우의 `dry-run-output` artifact에서 결과물을 확인할 수 있습니다.
 
-수동 실행은 GitHub 저장소의 `Actions` 탭에서 `Blogger Auto Post`를 선택한 뒤 `Run workflow`를 누르면 됩니다.
+결과가 괜찮으면:
 
-## 6. 로컬 실행
-
-한 번만 즉시 실행:
-
-```bash
-RUN_NOW=true python sp500_issue_blog_bot.py
+```text
+DRY_RUN=false
+PUBLISH_STATUS=draft
 ```
 
-로컬에서 계속 켜두고 스케줄러 실행:
+로 바꿔 Blogger 임시저장 업로드를 확인하고, 마지막에 자동 발행을 원하면:
 
-```bash
-python sp500_issue_blog_bot.py
+```text
+PUBLISH_STATUS=publish
 ```
 
-업로드 없이 파일로만 확인하려면 `.env`에서 `BLOG_PLATFORM=local`을 사용하세요.
+로 변경하세요.
+
+## 자동 실행
+
+워크플로우는 월-금 한국 시간 오전 7시 전후 발행을 목표로 합니다.
+
+```yaml
+cron: "50 21 * * 0-4"
+```
+
+GitHub Actions cron은 UTC 기준입니다. 위 설정은 한국 시간 월-금 06:50에 해당하며, GitHub 스케줄 지연을 고려한 값입니다.
+
+## 실행 추적
+
+매 실행 후 `run_summary.json`에 아래 메트릭이 누적됩니다.
+
+```text
+처리된 총 기사 수
+중복 스킵 수
+OpenAI API 호출 횟수
+입력/출력 글자 수
+입력/출력 토큰 수
+업로드 성공 수
+실패 기사 수
+오류 메시지
+```
+
+`history.json`에는 발행한 글의 GUID, URL, 제목, Blogger URL, 카테고리, 감지된 티커가 저장됩니다. 이 파일은 다음 실행에서 중복 차단과 "함께 보면 좋은 글" 내부 링크 빌딩에 함께 사용됩니다.
+
+## 비용 메모
+
+OpenAI 공식 가격표 기준 `gpt-4o-mini`는 텍스트 입력 $0.15 / 1M tokens, 출력 $0.60 / 1M tokens로 매우 저렴한 편입니다. 이 봇은 평일 하루 1건, 기사당 1회 호출, 입력 본문 1,200자 제한 구조라 월 20~23회 실행 기준 보통 매우 낮은 비용으로 운영됩니다. 실제 비용은 RSS 본문 길이와 출력 길이에 따라 달라지므로 OpenAI Usage 화면에서 확인하세요.
+
+가격은 바뀔 수 있으니 운영 전 공식 가격표를 확인하세요: https://platform.openai.com/docs/pricing

@@ -72,10 +72,11 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: "gpt-4o-mini"
           OPENAI_TEMPERATURE: ${{ vars.OPENAI_TEMPERATURE || '0.2' }}
-          MAX_OPENAI_OUTPUT_TOKENS: ${{ vars.MAX_OPENAI_OUTPUT_TOKENS || '700' }}
+          MAX_OPENAI_OUTPUT_TOKENS: ${{ vars.MAX_OPENAI_OUTPUT_TOKENS || '1500' }}
           RSS_FEED_URLS: ${{ vars.RSS_FEED_URLS }}
           MAX_ARTICLE_CHARS: ${{ vars.MAX_ARTICLE_CHARS || '2500' }}
           MAX_SUMMARY_INPUT_CHARS: ${{ vars.MAX_SUMMARY_INPUT_CHARS || '1200' }}
+          MIN_CLEAN_ARTICLE_CHARS: ${{ vars.MIN_CLEAN_ARTICLE_CHARS || '400' }}
           MAX_RELATED_LINKS: ${{ vars.MAX_RELATED_LINKS || '3' }}
           MAX_POSTS_PER_RUN: ${{ vars.MAX_POSTS_PER_RUN || '1' }}
           DRY_RUN: ${{ vars.DRY_RUN || 'false' }}

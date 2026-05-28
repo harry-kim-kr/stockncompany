@@ -5,3 +5,4 @@ token.json
 __pycache__/
 .pytest_cache/
 latest_sp500_issue_post.md
+output/

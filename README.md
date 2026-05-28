@@ -1,6 +1,6 @@
 # RSS Blogger Auto Post Bot
 
-월-금 한국 시간 오전 7시 전후에 RSS 뉴스를 수집하고, 중복을 먼저 차단한 뒤, `gpt-4o-mini` 1회 호출로 SEO용 JSON 데이터를 받아 Python HTML 템플릿과 조립해 Google Blogger에 업로드합니다.
+월-금 한국 시간 오전 7시 전후에 RSS 뉴스를 수집하고, 중복을 먼저 차단한 뒤, `gpt-4o-mini` 1회 호출로 기관 투자자 관점의 SEO 재무분석 JSON을 받아 Python HTML 템플릿과 조립해 Google Blogger에 업로드합니다.
 
 ## 핵심 구조
 
@@ -8,8 +8,9 @@
 - 저비용 모델 고정: `gpt-4o-mini`
 - 기사 1건당 OpenAI API 최대 1회 호출
 - OpenAI는 긴 HTML을 만들지 않고 JSON만 반환
-- Python이 FAQ, 핵심요약 박스, 인사이트 박스, 내부 링크가 포함된 최종 HTML 템플릿을 조립
+- Python이 Expectation Gap, Bull/Bear Thesis, Market Mispricing, FAQ, 내부 링크가 포함된 최종 HTML 템플릿을 조립
 - 중복 기준: RSS GUID, 기사 URL, 기사 제목 중 하나라도 일치하면 API 호출 전 스킵
+- 전처리 후 본문이 400자 미만이거나 부실하면 OpenAI 호출 전 스킵
 - `history.json` 기반으로 같은 카테고리 또는 같은 티커의 과거 글을 본문 하단에 자동 연결
 - 발행 성공 후 `history.json`, `run_summary.json`을 GitHub Actions가 자동 Commit & Push
 
@@ -35,16 +36,19 @@ GOOGLE_TOKEN_JSON
 필수:
 
 ```text
-RSS_FEED_URLS=https://example.com/feed.xml,https://example.com/rss
+RSS_FEED_URLS=https://example.com/feed.xml;https://example.com/rss
 ```
+
+RSS URL 내부에 쉼표가 들어갈 수 있으므로, 여러 피드를 넣을 때는 쉼표가 아니라 세미콜론(`;`) 또는 줄바꿈으로 구분하세요.
 
 권장 기본값:
 
 ```text
 OPENAI_TEMPERATURE=0.2
-MAX_OPENAI_OUTPUT_TOKENS=700
+MAX_OPENAI_OUTPUT_TOKENS=1500
 MAX_ARTICLE_CHARS=2500
 MAX_SUMMARY_INPUT_CHARS=1200
+MIN_CLEAN_ARTICLE_CHARS=400
 MAX_RELATED_LINKS=3
 MAX_POSTS_PER_RUN=1
 DRY_RUN=true
@@ -96,6 +100,7 @@ GitHub Actions cron은 UTC 기준입니다. 위 설정은 한국 시간 월-금 
 ```text
 처리된 총 기사 수
 중복 스킵 수
+빈 기사 스킵 수
 OpenAI API 호출 횟수
 입력/출력 글자 수
 입력/출력 토큰 수
@@ -108,6 +113,6 @@ OpenAI API 호출 횟수
 
 ## 비용 메모
 
-OpenAI 공식 가격표 기준 `gpt-4o-mini`는 텍스트 입력 $0.15 / 1M tokens, 출력 $0.60 / 1M tokens로 매우 저렴한 편입니다. 이 봇은 평일 하루 1건, 기사당 1회 호출, 입력 본문 1,200자 제한 구조라 월 20~23회 실행 기준 보통 매우 낮은 비용으로 운영됩니다. 실제 비용은 RSS 본문 길이와 출력 길이에 따라 달라지므로 OpenAI Usage 화면에서 확인하세요.
+OpenAI 공식 가격표 기준 `gpt-4o-mini`는 텍스트 입력 $0.15 / 1M tokens, 출력 $0.60 / 1M tokens로 매우 저렴한 편입니다. 이 봇은 평일 하루 1건, 기사당 1회 호출, 입력 본문 1,200자 제한, 빈 기사 사전 스킵 구조라 월 20~23회 실행 기준 보통 월 100원 이하 수준으로 운영될 가능성이 큽니다. 실제 비용은 RSS 본문 길이와 출력 길이에 따라 달라지므로 OpenAI Usage 화면에서 확인하세요.
 
 가격은 바뀔 수 있으니 운영 전 공식 가격표를 확인하세요: https://platform.openai.com/docs/pricing

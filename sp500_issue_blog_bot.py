@@ -27,7 +27,7 @@ from openai import APIStatusError, OpenAI, RateLimitError
 OPENAI_MODEL = "gpt-4o-mini"
 KST_RUN_TIME = "07:00"
 BLOGGER_SCOPES = ["https://www.googleapis.com/auth/blogger"]
-ALLOWED_CATEGORIES = {"스마트팜", "미국증시", "기술", "일반"}
+ALLOWED_CATEGORIES = {"미국증시", "기술주", "재무분석", "일반"}
 HISTORY_PATH = Path("history.json")
 RUN_SUMMARY_PATH = Path("run_summary.json")
 OUTPUT_DIR = Path("output")
@@ -95,6 +95,7 @@ class RunMetrics:
     output_tokens: int = 0
     uploaded_posts: int = 0
     failed_articles: int = 0
+    skipped_thin_articles: int = 0
     success: bool = False
     errors: list[str] | None = None
 
@@ -102,6 +103,15 @@ class RunMetrics:
 def split_env_list(name: str, default: str = "") -> list[str]:
     raw = os.getenv(name, default)
     return [item.strip() for item in re.split(r"[\n,]+", raw) if item.strip()]
+
+
+def get_rss_feed_urls() -> list[str]:
+    raw = os.getenv("RSS_FEED_URLS", "").strip()
+    if not raw:
+        return []
+    if "\n" in raw or ";" in raw:
+        return [item.strip() for item in re.split(r"[\n;]+", raw) if item.strip()]
+    return [raw]
 
 
 def load_json_file(path: Path, default):
@@ -182,7 +192,7 @@ def already_posted_today(history: dict) -> bool:
 
 
 def fetch_rss_entries() -> list[tuple[dict, str]]:
-    feed_urls = split_env_list("RSS_FEED_URLS")
+    feed_urls = get_rss_feed_urls()
     if not feed_urls:
         logging.warning("RSS_FEED_URLS is empty. Nothing to process.")
         return []
@@ -241,6 +251,24 @@ def compact_article_text(title: str, text: str) -> str:
     return compacted[:max_summary_chars].strip()
 
 
+def is_thin_article(article: NewsArticle) -> bool:
+    min_chars = int(os.getenv("MIN_CLEAN_ARTICLE_CHARS", "400"))
+    text = article.clean_text.strip()
+    if len(text) < min_chars:
+        return True
+
+    thin_patterns = [
+        r"자세한\s*내용은\s*(링크|본문|원문)",
+        r"more details?\s+at",
+        r"read\s+more",
+        r"continue\s+reading",
+        r"full story",
+        r"subscription required",
+        r"내용\s*없음",
+    ]
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in thin_patterns)
+
+
 def detect_tickers(article: NewsArticle | None = None, text: str = "") -> list[str]:
     source = f"{article.title if article else ''} {article.rss_summary if article else ''} {text}"
     matches = re.findall(r"\(([A-Z]{1,5})\)|\b([A-Z]{2,5})\b", source)
@@ -291,35 +319,47 @@ def entry_to_article(entry: dict, source_name: str) -> NewsArticle:
 def build_openai_prompt(article: NewsArticle) -> str:
     detected_tickers = detect_tickers(article)
     return f"""
-다음 뉴스 기사 데이터를 기반으로 SEO 블로그 포스팅에 필요한 JSON만 생성하세요.
+Create only one JSON object for a Korean SEO investment blog post.
 
-반드시 지켜야 할 규칙:
-- 출력은 반드시 요구된 스키마를 따르는 JSON 객체여야 합니다.
-- 모든 필드는 한글로 작성하세요.
-- 기사 데이터에 없는 사실, 수치, 기업명, 인물명, 전망을 지어내지 마세요.
-- 불확실한 내용은 단정하지 말고 확인 필요 또는 관전 포인트로 표현하세요.
-- 유사 문서처럼 보이는 딱딱한 요약문 대신 자연스러운 문장형으로 작성하세요.
-- category는 반드시 "스마트팜", "미국증시", "기술", "일반" 중 하나만 선택하세요.
-- points는 정확히 3개로 작성하세요.
+Persona:
+- Buy-side quantitative financial analyst and 10-year asset-management portfolio manager.
+- Mission: identify where market expectations may be mispriced versus confirmed facts.
+- Zero hallucination: never invent financial figures, consensus estimates, analyst targets, filings, company names, or dates not present in the source data.
+- Noise-free: no greetings, no filler, no stale transitions such as "firstly" or "in summary".
 
-스키마:
+Output rules:
+- The JSON keys must exactly follow the schema below.
+- All JSON values must be written in natural Korean for Korean readers.
+- If the article does not provide enough data for FCF, capital allocation, macro, or moat analysis, say that the available article data is insufficient instead of inventing numbers.
+- category must be exactly one of: "미국증시", "기술주", "재무분석", "일반".
+- points must contain exactly 3 items.
+
+Schema:
 {{
-  "seo_title": "클릭을 유도하는 트렌디하고 검색량이 높은 제목 (의문형이나 감탄형 조합)",
-  "hook_intro": "이 기사를 왜 읽어야 하는지 자연스럽게 설명하는 인간적인 도입부 문장 (2~3문장)",
-  "summary": "기사 핵심 내용에 대한 친절한 2문장 요약",
-  "points": ["핵심 포인트1", "핵심 포인트2", "핵심 포인트3"],
-  "faq_question": "사람들이 이 이슈나 종목에 대해 지금 구글에 가장 많이 검색해볼 만한 질문 1가지",
-  "faq_answer": "그 질문에 대한 명쾌하고 확실한 답변 2문장 (구글 스니펫 노출용)",
-  "opinion": "개인 투자자가 주목해야 할 리스크 또는 기회 요인 (자산운용사 매니저 관점의 조언)",
-  "category": "스마트팜 | 미국증시 | 기술 | 일반 중 택1"
+  "seo_title": "클릭을 유도하는 트렌디하고 검색량이 높은 한국어 제목 (의문형이나 감탄형 조합)",
+  "hook_intro": "이 이슈를 왜 지금 당장 주목해야 하는지 시장 기대치와 엮어 설명하는 강렬한 도입부 (2~3문장)",
+  "expectation_gap": "현재 시장 컨센서스(기대치)와 이번에 발생한 실제 결과(실적/공시/뉴스) 사이의 가장 큰 차이점 분석 (Fact 중심)",
+  "points": [
+    "재무/이익 성장지표 관점의 핵심 포인트 1가지",
+    "현금흐름(FCF) 품질 또는 자본배분(자사주/배당) 관점의 핵심 포인트 1가지",
+    "거시경제(금리/환율) 및 산업 구조적 해자(Moat) 관점의 핵심 포인트 1가지"
+  ],
+  "faq_question": "개인 투자자들이 이 종목/이슈에 대해 현재 구글에 가장 많이 검색해볼 만한 핵심 질문 1가지",
+  "faq_answer": "구글 추천 스니펫 상위 노출에 적합하도록 정제된 명쾌한 답변 2문장",
+  "bull_vs_bear": {{
+    "bull_thesis": "강한 매수/긍정 논리 1가지 (성장 모멘텀, Catalyst 중심)",
+    "bear_thesis": "강한 반대/리스크 논리 1가지 (밸류에이션 부담, SBC 희석, 규제 등)"
+  }},
+  "market_mispricing": "시장이 현재 가장 크게 틀리거나 놓치고 있는 단 하나의 오판 포인트(Mispricing Point) 분석",
+  "category": "미국증시 | 기술주 | 재무분석 | 일반 중 택1"
 }}
 
-기사 제목: {article.title}
-출처: {article.source_name}
+Article title: {article.title}
+Source: {article.source_name}
 URL: {article.url}
-감지된 티커 후보: {detected_tickers}
-RSS 요약: {article.rss_summary[:500]}
-전처리된 본문: {article.clean_text}
+Detected ticker candidates: {detected_tickers}
+RSS summary: {article.rss_summary[:500]}
+Cleaned article text: {article.clean_text}
 """.strip()
 
 
@@ -345,14 +385,15 @@ def call_openai_for_article(article: NewsArticle, metrics: RunMetrics) -> dict |
                 {
                     "role": "system",
                     "content": (
-                        "출력은 반드시 요구된 스키마를 따르는 JSON 형태여야 하며 한글로 작성하라. "
-                        "근거 없는 추측, 존재하지 않는 수치, 출처에 없는 사실을 만들지 마세요."
+                        "You must output only one JSON object following the requested schema. "
+                        "All JSON values must be written in natural Korean. "
+                        "Do not fabricate facts, financial figures, estimates, analyst views, or sources."
                     ),
                 },
                 {"role": "user", "content": prompt},
             ],
             temperature=float(os.getenv("OPENAI_TEMPERATURE", "0.2")),
-            max_tokens=int(os.getenv("MAX_OPENAI_OUTPUT_TOKENS", "700")),
+            max_tokens=int(os.getenv("MAX_OPENAI_OUTPUT_TOKENS", "1500")),
             response_format={"type": "json_object"},
         )
     except RateLimitError as exc:
@@ -399,11 +440,15 @@ def validate_ai_payload(payload: dict) -> dict:
     return {
         "seo_title": str(payload.get("seo_title", "오늘의 주요 뉴스, 지금 확인해야 할 핵심은?")).strip(),
         "hook_intro": str(payload.get("hook_intro", "")).strip(),
-        "summary": str(payload.get("summary", "")).strip(),
+        "expectation_gap": str(payload.get("expectation_gap", "")).strip(),
         "points": points,
         "faq_question": str(payload.get("faq_question", "이 이슈에서 가장 중요한 점은 무엇인가요?")).strip(),
         "faq_answer": str(payload.get("faq_answer", "")).strip(),
-        "opinion": str(payload.get("opinion", "")).strip(),
+        "bull_vs_bear": {
+            "bull_thesis": str((payload.get("bull_vs_bear") or {}).get("bull_thesis", "")).strip(),
+            "bear_thesis": str((payload.get("bull_vs_bear") or {}).get("bear_thesis", "")).strip(),
+        },
+        "market_mispricing": str(payload.get("market_mispricing", "")).strip(),
         "category": category,
     }
 
@@ -446,26 +491,35 @@ def build_post_html(ai_payload: dict, article: NewsArticle, history: dict, ticke
     source_name = html.escape(article.source_name or "Original article")
     source_url = html.escape(article.url)
     related_html = build_related_links_html(find_related_posts(history, ai_payload, tickers))
+    bull = html.escape(ai_payload["bull_vs_bear"]["bull_thesis"])
+    bear = html.escape(ai_payload["bull_vs_bear"]["bear_thesis"])
 
     return f"""
 <h1>{html.escape(ai_payload["seo_title"])}</h1>
-<p>👋 안녕하세요! 오늘 시장에서 가장 뜨거운 소식을 전해드립니다. {html.escape(ai_payload["hook_intro"])}</p>
+<p>👋 {html.escape(ai_payload["hook_intro"])}</p>
 <hr>
 <blockquote style="background: #f9f9f9; border-left: 8px solid #007bff; padding: 15px; margin: 20px 0;">
-  📌 <strong>핵심 3줄 요약 보기</strong><br>
+  📌 <strong>기관 투자자 관점 핵심 3줄 요약</strong><br>
   • {p0}<br>
   • {p1}<br>
   • {p2}
 </blockquote>
-<h2>🔍 이슈 핵심 파헤치기</h2>
-<p>{html.escape(ai_payload["summary"])}</p>
+<h2>📊 시장 기대치와의 괴리 (Expectation Gap)</h2>
+<p>{html.escape(ai_payload["expectation_gap"])}</p>
 <h2>❓ 무엇이 가장 중요할까요? (FAQ)</h2>
 <p><strong>Q. {html.escape(ai_payload["faq_question"])}</strong></p>
 <p>A. {html.escape(ai_payload["faq_answer"])}</p>
-<h2>💡 투자자 시선 &amp; 한 줄 인사이트</h2>
-<p style="color: #2c3e50; font-weight: bold; background: #f0f7ff; padding: 10px; border-radius: 5px;">{html.escape(ai_payload["opinion"])}</p>
+<h2>⚖️ 찬반 논리 점검 (Bull vs Bear Thesis)</h2>
+<ul>
+  <li><strong>상방 모멘텀 (Bull):</strong> {bull}</li>
+  <li><strong>하방 리스크 (Bear):</strong> {bear}</li>
+</ul>
+<h2>💡 월가의 오판 포인트 (Market Mispricing)</h2>
+<p style="color: #2c3e50; font-weight: bold; background: #f0f7ff; padding: 12px; border-radius: 5px;">{html.escape(ai_payload["market_mispricing"])}</p>
 {related_html}
 <p style="font-size: 0.9em; color: gray; margin-top: 30px;">원본 출처: <a href="{source_url}" target="_blank" rel="noopener noreferrer">{source_name}</a></p>
+<br>
+<p style="font-size: 0.85em; color: #95a5a6; text-align: center;">※ 본 분석은 의사결정 참고용 데이터이며, 최종 투자 책임은 사용자 본인에게 있습니다.</p>
 """.strip()
 
 
@@ -582,6 +636,11 @@ def process_one_article(
     if is_duplicate_article(article, history) or is_duplicate_in_run(article, seen_cache):
         metrics.skipped_duplicates += 1
         logging.info("Skipping duplicate article: %s", article.title)
+        return False
+
+    if is_thin_article(article):
+        metrics.skipped_thin_articles += 1
+        logging.info("Skipping thin article before OpenAI call: %s", article.title)
         return False
 
     seen_cache.add(article_cache_key(article))

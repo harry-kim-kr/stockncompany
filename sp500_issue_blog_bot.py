@@ -95,8 +95,10 @@ class RunMetrics:
     output_tokens: int = 0
     uploaded_posts: int = 0
     dry_run_outputs: int = 0
+    manual_prompt_outputs: int = 0
     failed_articles: int = 0
     skipped_thin_articles: int = 0
+    quota_or_rate_limit_blocked: bool = False
     blogger_urls: list[str] | None = None
     success: bool = False
     errors: list[str] | None = None
@@ -401,6 +403,7 @@ def call_openai_for_article(article: NewsArticle, metrics: RunMetrics) -> dict |
     except RateLimitError as exc:
         message = "OpenAI quota or rate limit exceeded."
         logging.error("%s %s", message, exc)
+        metrics.quota_or_rate_limit_blocked = True
         if metrics.errors is not None:
             metrics.errors.append(message)
         return None
@@ -603,6 +606,82 @@ def save_dry_run_output(ai_payload: dict, post_html: str, article: NewsArticle) 
     logging.info("DRY_RUN output saved: %s.*", base)
 
 
+def build_manual_gpt_prompt(article: NewsArticle, history: dict, tickers: list[str]) -> str:
+    related_posts = find_related_posts(
+        history,
+        {"category": "미국증시"},
+        tickers,
+    )
+    related_text = "\n".join(
+        f"- {post['title']}: {post['url']}" for post in related_posts
+    ) or "- 관련 과거 글 없음"
+
+    return f"""
+당신은 기관투자자(Buy-side) 스타일의 퀀트 기반 재무분석가이자 10년 차 자산운용사 매니저입니다.
+
+목표:
+- 아래 기사 데이터를 바탕으로 구글 검색 상위 노출을 노리는 한국어 Blogger용 HTML 글을 작성하세요.
+- 단순 요약이 아니라 시장 기대치 대비 mispricing이 발생한 투자 기회와 위험을 분석하세요.
+- 수집되지 않은 재무 수치, 컨센서스, 목표주가, 애널리스트 의견, 공시 내용은 절대 지어내지 마세요.
+- 자료에 없는 내용은 "기사 데이터만으로는 확인이 제한됩니다"라고 표현하세요.
+- 인사말, 감탄사, "첫째로", "요약하자면" 같은 진부한 표현 없이 바로 분석으로 들어가세요.
+
+출력:
+- Blogger에 바로 붙여넣을 수 있는 HTML만 출력하세요.
+- Markdown 설명, 코드블록, 별도 해설은 출력하지 마세요.
+
+HTML 구조:
+<h1>SEO 제목</h1>
+<p>이 이슈를 왜 지금 봐야 하는지 시장 기대치와 엮은 강한 도입부 2~3문장</p>
+<hr>
+<blockquote style="background: #f9f9f9; border-left: 8px solid #007bff; padding: 15px; margin: 20px 0;">
+  📌 <strong>기관 투자자 관점 핵심 3줄 요약</strong><br>
+  • 핵심 포인트 1<br>
+  • 핵심 포인트 2<br>
+  • 핵심 포인트 3
+</blockquote>
+<h2>📊 시장 기대치와의 괴리 (Expectation Gap)</h2>
+<p>시장 기대치와 실제 뉴스 사이의 차이를 Fact 중심으로 분석</p>
+<h2>❓ 무엇이 가장 중요할까요? (FAQ)</h2>
+<p><strong>Q. 개인 투자자가 검색할 만한 핵심 질문</strong></p>
+<p>A. 구글 추천 스니펫에 적합한 2문장 답변</p>
+<h2>⚖️ 찬반 논리 점검 (Bull vs Bear Thesis)</h2>
+<ul>
+  <li><strong>상방 모멘텀 (Bull):</strong> 성장 모멘텀 또는 catalyst 중심 긍정 논리</li>
+  <li><strong>하방 리스크 (Bear):</strong> 밸류에이션, 희석, 규제, 수요 둔화 등 반대 논리</li>
+</ul>
+<h2>💡 월가의 오판 포인트 (Market Mispricing)</h2>
+<p style="color: #2c3e50; font-weight: bold; background: #f0f7ff; padding: 12px; border-radius: 5px;">시장이 놓치고 있을 수 있는 단 하나의 오판 포인트</p>
+<h2>📚 함께 보면 좋은 글</h2>
+<ul>
+  관련 글이 있으면 아래 관련 과거 글 목록을 활용해 자연스러운 앵커 링크 삽입
+</ul>
+<p style="font-size: 0.9em; color: gray; margin-top: 30px;">원본 출처: <a href="{html.escape(article.url)}" target="_blank" rel="noopener noreferrer">{html.escape(article.source_name)}</a></p>
+<br>
+<p style="font-size: 0.85em; color: #95a5a6; text-align: center;">※ 본 분석은 의사결정 참고용 데이터이며, 최종 투자 책임은 사용자 본인에게 있습니다.</p>
+
+기사 데이터:
+- 제목: {article.title}
+- 출처: {article.source_name}
+- URL: {article.url}
+- 감지된 티커 후보: {tickers}
+- RSS 요약: {article.rss_summary[:700]}
+- 전처리된 본문: {article.clean_text}
+
+관련 과거 글:
+{related_text}
+""".strip()
+
+
+def save_manual_prompt_output(article: NewsArticle, history: dict, tickers: list[str]) -> None:
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    timestamp = datetime.now(KST).strftime("%Y%m%d_%H%M%S")
+    safe_title = re.sub(r"[^A-Za-z0-9가-힣_-]+", "_", article.title)[:60]
+    path = OUTPUT_DIR / f"{timestamp}_manual_prompt_{safe_title}.md"
+    path.write_text(build_manual_gpt_prompt(article, history, tickers), encoding="utf-8")
+    logging.info("Manual GPT prompt saved: %s", path)
+
+
 def update_history(history: dict, article: NewsArticle, ai_payload: dict, upload_result: dict, tickers: list[str]) -> None:
     items = history.setdefault("items", [])
     items.append(
@@ -626,7 +705,12 @@ def update_history(history: dict, article: NewsArticle, ai_payload: dict, upload
 
 def append_run_summary(metrics: RunMetrics) -> None:
     metrics.finished_at = datetime.now(KST).isoformat(timespec="seconds")
-    metrics.success = metrics.uploaded_posts > 0 or metrics.dry_run_outputs > 0 or metrics.failed_articles == 0
+    metrics.success = (
+        metrics.uploaded_posts > 0
+        or metrics.dry_run_outputs > 0
+        or metrics.manual_prompt_outputs > 0
+        or metrics.failed_articles == 0
+    )
     payload = load_json_file(RUN_SUMMARY_PATH, {"runs": []})
     payload.setdefault("runs", []).append(asdict(metrics))
     payload["runs"] = payload["runs"][-int(os.getenv("RUN_SUMMARY_KEEP_ITEMS", "200")) :]
@@ -653,6 +737,13 @@ def process_one_article(
         return False
 
     seen_cache.add(article_cache_key(article))
+    tickers = detect_tickers(article)
+
+    if os.getenv("MANUAL_PROMPT_MODE", "false").lower() == "true":
+        save_manual_prompt_output(article, history, tickers)
+        metrics.manual_prompt_outputs += 1
+        return True
+
     ai_payload = call_openai_for_article(article, metrics)
     if not ai_payload:
         metrics.failed_articles += 1
@@ -700,7 +791,10 @@ def run_once() -> None:
             return
 
         for entry, source_name in fetch_rss_entries():
-            if metrics.uploaded_posts + metrics.dry_run_outputs >= max_posts:
+            if metrics.uploaded_posts + metrics.dry_run_outputs + metrics.manual_prompt_outputs >= max_posts:
+                break
+            if metrics.quota_or_rate_limit_blocked:
+                logging.warning("Stopping early because OpenAI quota or rate limit is blocked.")
                 break
             try:
                 article = entry_to_article(entry, source_name)
@@ -717,6 +811,15 @@ def run_once() -> None:
                 continue
     finally:
         append_run_summary(metrics)
+
+    should_require_post = os.getenv("REQUIRE_POST_SUCCESS", "true").lower() == "true"
+    is_real_upload_mode = os.getenv("DRY_RUN", "false").lower() != "true"
+    is_manual_prompt_mode = os.getenv("MANUAL_PROMPT_MODE", "false").lower() == "true"
+    if should_require_post and is_real_upload_mode and not is_manual_prompt_mode and metrics.uploaded_posts == 0:
+        logging.error(
+            "No Blogger post was created. Marking workflow as failed to avoid a false success signal."
+        )
+        raise SystemExit(1)
 
 
 def run_scheduler() -> None:

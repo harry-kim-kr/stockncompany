@@ -13,6 +13,7 @@
 - 전처리 후 본문이 400자 미만이거나 부실하면 OpenAI 호출 전 스킵
 - `history.json` 기반으로 같은 카테고리 또는 같은 티커의 과거 글을 본문 하단에 자동 연결
 - 발행 성공 후 `history.json`, `run_summary.json`을 GitHub Actions가 자동 Commit & Push
+- `MANUAL_PROMPT_MODE=true`이면 OpenAI API와 Blogger API를 호출하지 않고 ChatGPT 웹에 붙여넣을 프롬프트만 생성
 
 ## 설치
 
@@ -51,11 +52,24 @@ MAX_SUMMARY_INPUT_CHARS=1200
 MIN_CLEAN_ARTICLE_CHARS=400
 MAX_RELATED_LINKS=3
 MAX_POSTS_PER_RUN=1
+MANUAL_PROMPT_MODE=true
+REQUIRE_POST_SUCCESS=true
 DRY_RUN=true
 PUBLISH_STATUS=draft
 ```
 
 `OPENAI_MODEL`은 워크플로우에서 `gpt-4o-mini`로 고정되어 있습니다.
+
+## 수동 프롬프트 모드
+
+OpenAI API 결제 전에는 아래 설정을 권장합니다.
+
+```text
+MANUAL_PROMPT_MODE=true
+DRY_RUN=true
+```
+
+이 모드에서는 RSS 수집, 중복 차단, 빈 기사 필터링, 본문 압축까지만 자동으로 수행하고, `output/` 폴더에 ChatGPT 웹에 붙여넣을 `.md` 프롬프트 파일을 생성합니다. GitHub Actions 실행 후 `generated-output` artifact를 내려받아 프롬프트를 복사한 뒤, 유료 ChatGPT 화면에 붙여넣으면 됩니다.
 
 ## DRY_RUN 테스트
 
@@ -110,6 +124,8 @@ OpenAI API 호출 횟수
 ```
 
 `history.json`에는 발행한 글의 GUID, URL, 제목, Blogger URL, 카테고리, 감지된 티커가 저장됩니다. 이 파일은 다음 실행에서 중복 차단과 "함께 보면 좋은 글" 내부 링크 빌딩에 함께 사용됩니다.
+
+`REQUIRE_POST_SUCCESS=true`이면 `DRY_RUN=false`인 실제 업로드 모드에서 Blogger 글이 0건 생성될 경우 GitHub Actions를 실패 처리합니다. 따라서 OpenAI 쿼터 부족처럼 실제 발행이 없었던 실행이 초록 체크로 보이지 않습니다.
 
 ## 비용 메모
 

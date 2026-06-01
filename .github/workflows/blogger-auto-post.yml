@@ -31,6 +31,7 @@ jobs:
       - name: Validate required secrets
         shell: python
         env:
+          MANUAL_PROMPT_MODE: ${{ vars.MANUAL_PROMPT_MODE || 'true' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
           GOOGLE_CLIENT_SECRET_JSON: ${{ secrets.GOOGLE_CLIENT_SECRET_JSON }}
@@ -38,16 +39,19 @@ jobs:
         run: |
           import os
 
-          missing = [
-              name
-              for name in (
-                  "OPENAI_API_KEY",
-                  "BLOGGER_BLOG_ID",
-                  "GOOGLE_CLIENT_SECRET_JSON",
-                  "GOOGLE_TOKEN_JSON",
-              )
-              if not os.environ.get(name, "").strip()
-          ]
+          if os.environ.get("MANUAL_PROMPT_MODE", "true").lower() == "true":
+              missing = []
+          else:
+              missing = [
+                  name
+                  for name in (
+                      "OPENAI_API_KEY",
+                      "BLOGGER_BLOG_ID",
+                      "GOOGLE_CLIENT_SECRET_JSON",
+                      "GOOGLE_TOKEN_JSON",
+                  )
+                  if not os.environ.get(name, "").strip()
+              ]
           if missing:
               raise SystemExit("Missing required GitHub Secrets: " + ", ".join(missing))
 
@@ -55,6 +59,7 @@ jobs:
         run: python -m pip install -r requirements.txt
 
       - name: Restore Google OAuth files
+        if: ${{ (vars.MANUAL_PROMPT_MODE || 'true') != 'true' }}
         shell: python
         env:
           GOOGLE_CLIENT_SECRET_JSON: ${{ secrets.GOOGLE_CLIENT_SECRET_JSON }}
@@ -69,6 +74,7 @@ jobs:
       - name: Run RSS Blogger auto post
         env:
           RUN_NOW: "true"
+          MANUAL_PROMPT_MODE: ${{ vars.MANUAL_PROMPT_MODE || 'true' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: "gpt-4o-mini"
           OPENAI_TEMPERATURE: ${{ vars.OPENAI_TEMPERATURE || '0.2' }}
@@ -79,6 +85,7 @@ jobs:
           MIN_CLEAN_ARTICLE_CHARS: ${{ vars.MIN_CLEAN_ARTICLE_CHARS || '400' }}
           MAX_RELATED_LINKS: ${{ vars.MAX_RELATED_LINKS || '3' }}
           MAX_POSTS_PER_RUN: ${{ vars.MAX_POSTS_PER_RUN || '1' }}
+          REQUIRE_POST_SUCCESS: ${{ vars.REQUIRE_POST_SUCCESS || 'true' }}
           DRY_RUN: ${{ vars.DRY_RUN || 'false' }}
           PUBLISH_STATUS: ${{ vars.PUBLISH_STATUS || 'draft' }}
           BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
@@ -87,10 +94,10 @@ jobs:
         run: python sp500_issue_blog_bot.py
 
       - name: Upload DRY_RUN output
-        if: ${{ vars.DRY_RUN == 'true' }}
+        if: ${{ vars.DRY_RUN == 'true' || (vars.MANUAL_PROMPT_MODE || 'true') == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: dry-run-output
+          name: generated-output
           path: output/
           if-no-files-found: ignore
 
@@ -103,7 +110,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Commit history and run summary
-        if: ${{ vars.DRY_RUN != 'true' }}
+        if: ${{ vars.DRY_RUN != 'true' && (vars.MANUAL_PROMPT_MODE || 'true') != 'true' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

@@ -71,6 +71,44 @@
         "OpenAI quota or rate limit exceeded.",
         "OpenAI quota or rate limit exceeded."
       ]
+    },
+    {
+      "started_at": "2026-06-01T09:11:12+09:00",
+      "finished_at": "2026-06-01T09:11:52+09:00",
+      "processed_articles": 30,
+      "skipped_duplicates": 1,
+      "openai_calls": 19,
+      "input_chars": 64658,
+      "output_chars": 0,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "uploaded_posts": 0,
+      "dry_run_outputs": 0,
+      "failed_articles": 19,
+      "skipped_thin_articles": 10,
+      "blogger_urls": [],
+      "success": false,
+      "errors": [
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded.",
+        "OpenAI quota or rate limit exceeded."
+      ]
     }
   ]
 }

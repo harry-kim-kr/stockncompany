@@ -273,6 +273,84 @@ def is_thin_article(article: NewsArticle) -> bool:
     return any(re.search(pattern, text, re.IGNORECASE) for pattern in thin_patterns)
 
 
+def has_premium_or_paywall_text(text: str) -> bool:
+    patterns = [
+        r"\bpremium\b",
+        r"upgrade\s+to\s+read",
+        r"subscription\s+required",
+        r"subscribe\s+to\s+continue",
+        r"sign\s+in\s+to\s+(read|continue|view)",
+        r"register\s+to\s+(read|continue|view)",
+        r"유료\s*기사",
+        r"구독\s*회원",
+        r"로그인\s*후",
+    ]
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+
+def content_quality_score(article: NewsArticle) -> int:
+    text = article.clean_text.strip()
+    sentences = split_sentences(text)
+    score = 0
+    score += min(len(text) // 20, 40)
+    score += min(len(sentences) * 5, 30)
+    if re.search(r"\b\d+(\.\d+)?%?\b|\$\d+|billion|million|EPS|revenue|margin|cash flow|FCF", text, re.I):
+        score += 15
+    if re.search(r"company|market|sales|demand|chip|AI|cloud|margin|growth|guidance|earnings", text, re.I):
+        score += 10
+    if has_premium_or_paywall_text(f"{article.title} {article.rss_summary} {text}"):
+        score -= 25
+    if re.search(r"advertisement|related articles|read more|continue reading|all rights reserved", text, re.I):
+        score -= 15
+    return max(0, min(score, 100))
+
+
+def is_limited_source(article: NewsArticle) -> bool:
+    text = article.clean_text.strip()
+    combined = f"{article.title} {article.rss_summary} {text}"
+    meaningful_sentences = split_sentences(text)
+    has_financial_or_event_detail = bool(
+        re.search(
+            r"\b(revenue|earnings|EPS|margin|cash flow|FCF|guidance|acquisition|lawsuit|export|sales|demand|supply|chip|AI|cloud|dividend|buyback)\b|\d",
+            combined,
+            re.I,
+        )
+    )
+    return (
+        len(text) < int(os.getenv("LIMITED_SOURCE_CHARS", "800"))
+        or has_premium_or_paywall_text(combined)
+        or len(meaningful_sentences) < int(os.getenv("MIN_MEANINGFUL_SENTENCES", "4"))
+        or content_quality_score(article) < int(os.getenv("MIN_CONTENT_QUALITY_SCORE", "45"))
+        or not has_financial_or_event_detail
+    )
+
+
+def classify_article_type(article: NewsArticle, tickers: list[str]) -> str:
+    text = f"{article.title} {article.rss_summary} {article.clean_text} {' '.join(tickers)}".lower()
+    if re.search(r"ai|chip|semiconductor|gpu|asic|hbm|memory|nvidia|amd|intel|data center|datacenter", text):
+        return "AI/반도체 기사"
+    if re.search(r"fcf|free cash flow|cash flow|roic|buyback|dividend|capital allocation|value stock", text):
+        return "현금흐름/가치주 기사"
+    if re.search(r"consumer|retail|inventory|brand|pricing power|discretionary|staples|sales slowdown", text):
+        return "소비재/경기민감주 기사"
+    if re.search(r"big tech|cloud|advertising|platform|regulation|capex|apple|microsoft|google|meta|amazon", text):
+        return "빅테크 기사"
+    if re.search(r"etf|dividend yield|distribution|nav|expense ratio|income fund", text):
+        return "ETF/배당 기사"
+    return "일반 시장/기업 뉴스"
+
+
+def article_type_guide(article_type: str) -> str:
+    guides = {
+        "AI/반도체 기사": "- AI 학습 vs AI 추론\n- GPU, ASIC, 메모리, HBM, 저가 메모리\n- 엔비디아, AMD, 인텔, 빅테크 자체 칩\n- 공급망, 전력, 데이터센터 CAPEX\n- 성능보다 TCO가 중요한 구간",
+        "현금흐름/가치주 기사": "- FCF\n- FCF Margin\n- ROIC\n- 자본배분\n- 자사주 매입\n- 배당\n- M&A\n- 현금흐름은 좋지만 성장성이 부족한 기업의 함정",
+        "소비재/경기민감주 기사": "- 소비 사이클\n- 재고 부담\n- 금리 민감도\n- 수요 둔화\n- 브랜드 파워\n- 가격 전가력",
+        "빅테크 기사": "- 클라우드\n- 광고\n- AI CAPEX\n- 플랫폼 락인\n- 규제 리스크\n- 주주환원",
+        "ETF/배당 기사": "- 총수익률\n- 배당 착시\n- NAV 훼손\n- 비용률\n- 기초자산 리스크\n- 분배금 지속 가능성",
+    }
+    return guides.get(article_type, "- 기사에 확인된 사건\n- 산업 구조\n- 경쟁 구도\n- 수요와 비용 변수\n- 투자자가 확인해야 할 리스크")
+
+
 def detect_tickers(article: NewsArticle | None = None, text: str = "") -> list[str]:
     source = f"{article.title if article else ''} {article.rss_summary if article else ''} {text}"
     matches = re.findall(r"\(([A-Z]{1,5})\)|\b([A-Z]{2,5})\b", source)
@@ -615,29 +693,53 @@ def build_manual_gpt_prompt(article: NewsArticle, history: dict, tickers: list[s
     related_text = "\n".join(
         f"- {post['title']}: {post['url']}" for post in related_posts
     ) or "- 관련 과거 글 없음"
-    is_limited_source = len(article.clean_text.strip()) < 800
+    limited_source = is_limited_source(article)
+    quality_score = content_quality_score(article)
+    article_type = classify_article_type(article, tickers)
+    guide = article_type_guide(article_type)
+    limited_source_instruction = (
+        """- 제한적 원문 여부: True
+- 원문이 Premium/부분 공개 기사이거나 본문 데이터가 부족합니다.
+- 얇은 기사 요약문으로 작성하지 마세요.
+- 제목과 공개 요약을 "시드 이슈"로만 사용하고, 검증 가능한 일반 산업 지식 중심의 SEO 전략 분석 글로 확장하세요.
+- 기사에 없는 최신 수치, 성능 데이터, 매출, EPS, 목표주가, 컨센서스, 애널리스트 의견은 절대 만들지 마세요.
+- 필요한 경우 "기사 데이터만으로는 확인이 제한됩니다"라고 명시하세요."""
+        if limited_source
+        else
+        """- 제한적 원문 여부: False
+- 원문 본문이 충분하더라도 기사에 없는 재무 수치, 목표주가, 컨센서스, 공시 내용은 만들지 마세요.
+- 단순 요약이 아니라 투자자 관점의 시장 기대치와 mispricing 가능성을 분석하세요."""
+    )
 
     return f"""
 당신은 기관투자자(Buy-side) 스타일의 퀀트 기반 재무분석가이자 10년 차 자산운용사 매니저입니다.
 
 목표:
-- 아래 기사 데이터를 바탕으로 구글 검색 상위 노출을 노리는 한국어 Blogger용 HTML 글을 작성하세요.
+- 아래 기사 데이터를 바탕으로 구글 검색 상위 노출을 노리는 한국어 Blogger/Tistory용 HTML 글을 작성하세요.
 - 단순 요약이 아니라 시장 기대치 대비 mispricing이 발생한 투자 기회와 위험을 분석하세요.
 - 수집되지 않은 재무 수치, 컨센서스, 목표주가, 애널리스트 의견, 공시 내용은 절대 지어내지 마세요.
 - 자료에 없는 내용은 "기사 데이터만으로는 확인이 제한됩니다"라고 표현하세요.
 - 인사말, 감탄사, "첫째로", "요약하자면" 같은 진부한 표현 없이 바로 분석으로 들어가세요.
 
 제한적 원문 처리:
-- 제한적 원문 여부: {is_limited_source}
-- 원문이 Premium/부분 공개 기사이거나 본문 데이터가 부족하면, 얇은 기사 요약문으로 쓰지 마세요.
-- 이 경우 제목과 공개 요약을 "시드 이슈"로만 사용하고, 검증 가능한 일반 산업 지식 중심의 SEO 전략 분석 글로 확장하세요.
-- 예: 인텔 AI 칩/저가 메모리 이슈라면 "인텔 AI 반도체 재도전, 엔비디아 독주를 흔들 수 있을까?"처럼 산업 구조 관점 제목을 잡으세요.
-- 확장 섹션에는 현재 기업 위치, 경쟁사 비교, 시장 구조, 기술/원가 전략의 의미, 투자자가 볼 포인트를 포함하세요.
-- 단, 기사에 없는 최신 수치, 성능 데이터, 매출, EPS, 목표주가, 컨센서스는 절대 만들어내지 마세요.
+{limited_source_instruction}
 - 글 길이는 공백 제외 최소 2,000자 이상, 가능하면 2,500~3,500자 수준으로 작성하세요.
 
+SEO 제목 작성 규칙:
+- 검색자가 실제로 입력할 만한 키워드를 포함하세요.
+- 단순 기사 제목 번역을 피하세요.
+- 산업 구조, 투자 포인트, 경쟁 구도, 리스크를 반영하세요.
+- 예:
+  - "인텔 AI 반도체 재도전, 엔비디아 독주를 흔들 수 있을까?"
+  - "현금흐름이 좋은 기업이 반드시 좋은 투자일까? FCF와 자본배분의 함정"
+  - "AI 추론 시장이 커질수록 주목해야 할 반도체 투자 포인트"
+
+기사 유형별 확장 가이드:
+- 자동 추정 기사 유형: {article_type}
+{guide}
+
 출력:
-- Blogger에 바로 붙여넣을 수 있는 HTML만 출력하세요.
+- Blogger/Tistory에 바로 붙여넣을 수 있는 HTML만 출력하세요.
 - Markdown 설명, 코드블록, 별도 해설은 출력하지 마세요.
 
 HTML 구조:
@@ -668,7 +770,8 @@ HTML 구조:
 <p style="color: #2c3e50; font-weight: bold; background: #f0f7ff; padding: 12px; border-radius: 5px;">시장이 놓치고 있을 수 있는 단 하나의 오판 포인트</p>
 <h2>📚 함께 보면 좋은 글</h2>
 <ul>
-  관련 글이 있으면 아래 관련 과거 글 목록을 활용해 자연스러운 앵커 링크 삽입
+  관련 글이 있으면 관련 과거 글 목록을 활용해 자연스러운 앵커 링크 삽입
+  관련 과거 글이 없으면 <li>관련 과거 글은 아직 없습니다. 향후 반도체, AI, 자유현금흐름, 배당 ETF 관련 분석 글을 추가할 예정입니다.</li> 사용
 </ul>
 <p style="font-size: 0.9em; color: gray; margin-top: 30px;">원본 출처: <a href="{html.escape(article.url)}" target="_blank" rel="noopener noreferrer">{html.escape(article.source_name)}</a></p>
 <br>
@@ -680,6 +783,9 @@ HTML 구조:
 - URL: {article.url}
 - 감지된 티커 후보: {tickers}
 - RSS 요약: {article.rss_summary[:700]}
+- 제한적 원문 여부: {limited_source}
+- 본문 품질 점수: {quality_score}
+- 기사 유형: {article_type}
 - 전처리된 본문: {article.clean_text}
 
 관련 과거 글:
@@ -745,9 +851,9 @@ def process_one_article(
         logging.info("Skipping duplicate article: %s", article.title)
         return False
 
-    if is_thin_article(article):
+    if is_thin_article(article) or is_limited_source(article):
         if os.getenv("MANUAL_PROMPT_MODE", "false").lower() == "true" and article.rss_summary.strip():
-            logging.info("Thin article accepted for manual prompt mode: %s", article.title)
+            logging.info("Limited/thin article accepted for manual prompt mode: %s", article.title)
         else:
             metrics.skipped_thin_articles += 1
             logging.info("Skipping thin article before OpenAI call: %s", article.title)

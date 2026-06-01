@@ -94,6 +94,14 @@ jobs:
           path: output/
           if-no-files-found: ignore
 
+      - name: Upload run summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-summary
+          path: run_summary.json
+          if-no-files-found: ignore
+
       - name: Commit history and run summary
         if: ${{ vars.DRY_RUN != 'true' }}
         run: |

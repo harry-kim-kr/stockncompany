@@ -94,8 +94,10 @@ class RunMetrics:
     input_tokens: int = 0
     output_tokens: int = 0
     uploaded_posts: int = 0
+    dry_run_outputs: int = 0
     failed_articles: int = 0
     skipped_thin_articles: int = 0
+    blogger_urls: list[str] | None = None
     success: bool = False
     errors: list[str] | None = None
 
@@ -571,7 +573,7 @@ def upload_to_blogger(ai_payload: dict, post_html: str, tickers: list[str]) -> d
     }
 
     service = get_blogger_service()
-    return (
+    result = (
         service.posts()
         .insert(
             blogId=blog_id,
@@ -582,6 +584,13 @@ def upload_to_blogger(ai_payload: dict, post_html: str, tickers: list[str]) -> d
         )
         .execute()
     )
+    post_url = result.get("url")
+    post_id = result.get("id")
+    status = "draft" if is_draft else "published"
+    logging.info("Blogger API accepted post. status=%s id=%s url=%s", status, post_id, post_url)
+    if not post_id:
+        raise RuntimeError(f"Blogger API response did not include a post id: {result}")
+    return result
 
 
 def save_dry_run_output(ai_payload: dict, post_html: str, article: NewsArticle) -> None:
@@ -617,7 +626,7 @@ def update_history(history: dict, article: NewsArticle, ai_payload: dict, upload
 
 def append_run_summary(metrics: RunMetrics) -> None:
     metrics.finished_at = datetime.now(KST).isoformat(timespec="seconds")
-    metrics.success = metrics.uploaded_posts > 0 or metrics.failed_articles == 0
+    metrics.success = metrics.uploaded_posts > 0 or metrics.dry_run_outputs > 0 or metrics.failed_articles == 0
     payload = load_json_file(RUN_SUMMARY_PATH, {"runs": []})
     payload.setdefault("runs", []).append(asdict(metrics))
     payload["runs"] = payload["runs"][-int(os.getenv("RUN_SUMMARY_KEEP_ITEMS", "200")) :]
@@ -654,7 +663,7 @@ def process_one_article(
 
     if os.getenv("DRY_RUN", "false").lower() == "true":
         save_dry_run_output(ai_payload, post_html, article)
-        metrics.uploaded_posts += 1
+        metrics.dry_run_outputs += 1
         return True
 
     try:
@@ -669,6 +678,8 @@ def process_one_article(
 
     update_history(history, article, ai_payload, upload_result, tickers)
     metrics.uploaded_posts += 1
+    if metrics.blogger_urls is not None and upload_result.get("url"):
+        metrics.blogger_urls.append(upload_result["url"])
     logging.info("Uploaded Blogger post: %s", upload_result.get("url") or upload_result.get("id"))
     return True
 
@@ -678,7 +689,7 @@ def run_once() -> None:
     if os.getenv("OPENAI_MODEL", OPENAI_MODEL) != OPENAI_MODEL:
         logging.warning("OPENAI_MODEL is fixed to %s for minimum-cost operation.", OPENAI_MODEL)
 
-    metrics = RunMetrics(started_at=datetime.now(KST).isoformat(timespec="seconds"), errors=[])
+    metrics = RunMetrics(started_at=datetime.now(KST).isoformat(timespec="seconds"), errors=[], blogger_urls=[])
     history = load_json_file(HISTORY_PATH, {"items": []})
     max_posts = int(os.getenv("MAX_POSTS_PER_RUN", "1"))
     seen_cache: set[tuple[str, str, str]] = set()
@@ -689,7 +700,7 @@ def run_once() -> None:
             return
 
         for entry, source_name in fetch_rss_entries():
-            if metrics.uploaded_posts >= max_posts:
+            if metrics.uploaded_posts + metrics.dry_run_outputs >= max_posts:
                 break
             try:
                 article = entry_to_article(entry, source_name)

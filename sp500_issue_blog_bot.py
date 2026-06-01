@@ -1493,6 +1493,215 @@ def run_once() -> None:
         raise SystemExit(1)
 
 
+def keyword_score(text: str, keywords: list[str]) -> int:
+    lowered = text.lower()
+    return sum(1 for keyword in keywords if keyword.lower() in lowered)
+
+
+def classify_article_type(article: NewsArticle, tickers: list[str]) -> str:
+    text = f"{article.title} {article.rss_summary} {article.clean_text} {' '.join(tickers)}".lower()
+    strong_cashflow_keywords = [
+        keyword
+        for keyword in CASHFLOW_VALUE_KEYWORDS + CASHFLOW_VALUE_KEYWORDS_KO
+        if keyword.lower() not in {"dividend", "배당"}
+    ]
+    cash_score = keyword_score(text, strong_cashflow_keywords)
+    etf_score = keyword_score(text, ETF_DIVIDEND_KEYWORDS)
+    ai_score = keyword_score(text, AI_SEMICONDUCTOR_KEYWORDS)
+
+    if etf_score >= 2 or (etf_score >= 1 and "etf" in text):
+        return "etf_dividend"
+    if cash_score and ai_score:
+        return "ai_semiconductor" if ai_score >= cash_score + 2 else "cashflow_value"
+    if cash_score:
+        return "cashflow_value"
+    if ai_score:
+        return "ai_semiconductor"
+    if re.search(r"big tech|cloud|advertising|platform|regulation|capex|apple|microsoft|google|meta|amazon", text):
+        return "bigtech"
+    if re.search(r"consumer|retail|inventory|brand|pricing power|discretionary|staples|sales slowdown", text):
+        return "consumer_cyclical"
+    return "general_market"
+
+
+def article_type_guide(article_type: str) -> str:
+    guides = {
+        "cashflow_value": "- 자동 추정 기사 유형: 현금흐름/가치주 기사\n- 자유현금흐름(FCF), FCF Margin, ROIC\n- 자본배분, 자사주 매입, 배당, M&A\n- 현금흐름은 좋지만 성장성이 부족한 기업의 함정\n- \"현금을 많이 버는 기업\"과 \"좋은 투자 대상\"의 차이\n- 현금 창출력과 성장 지속성 사이의 균형",
+        "ai_semiconductor": "- 자동 추정 기사 유형: AI/반도체 기사\n- AI 학습 vs AI 추론\n- GPU, ASIC, 메모리, HBM, 저가 메모리\n- 엔비디아, AMD, 인텔, 빅테크 자체 칩\n- 공급망, 전력, 데이터센터 CAPEX\n- 성능보다 TCO가 중요한 구간\n- 반도체 사이클과 고객 집중 리스크",
+        "etf_dividend": "- 자동 추정 기사 유형: ETF/배당 기사\n- 총수익률, 배당 착시, NAV 훼손\n- 비용률, 기초자산 리스크\n- 분배금 지속 가능성",
+        "consumer_cyclical": "- 자동 추정 기사 유형: 소비재/경기민감주 기사\n- 소비 사이클, 재고 부담, 금리 민감도\n- 수요 둔화, 브랜드 파워, 가격 전가력",
+        "bigtech": "- 자동 추정 기사 유형: 빅테크 기사\n- 클라우드, 광고, AI CAPEX\n- 플랫폼 락인, 규제 리스크, 주주환원\n- 기술 부채와 보안 리스크가 기업 고객 유지율에 미치는 영향",
+    }
+    return guides.get(article_type, "- 자동 추정 기사 유형: 일반 시장 뉴스\n- 기사에 확인된 사건\n- 산업 구조\n- 경쟁 구도\n- 수요와 비용 변수\n- 투자자가 확인해야 할 리스크")
+
+
+def fallback_related_links_html(article_type: str) -> str:
+    category_links = {
+        "cashflow_value": [
+            ("/category/재무분석", "💡 미국 기업 자유현금흐름(FCF) 및 자본배분 분석 모음 보기"),
+            ("/category/미국주식", "📈 빅테크와 가치주의 주주환원 전략 분석 보기"),
+        ],
+        "ai_semiconductor": [
+            ("/category/AI·반도체", "💡 글로벌 AI 및 반도체 공급망 밸류에이션 분석 시리즈 보기"),
+            ("/category/미국주식", "📈 빅테크 AI CAPEX와 데이터센터 투자 사이클 보기"),
+        ],
+        "etf_dividend": [
+            ("/category/ETF·배당", "💡 배당 ETF의 총수익률과 분배금 지속 가능성 분석 보기"),
+            ("/category/미국주식", "📈 미국 인컴형 자산의 리스크 점검 글 모음 보기"),
+        ],
+    }
+    links = category_links.get(
+        article_type,
+        [
+            ("/category/미국주식", "📈 미국 주식 시장 이슈 분석 모음 보기"),
+            ("/category/재무분석", "💡 기업 실적과 현금흐름 분석 글 모음 보기"),
+        ],
+    )
+    return "\n".join(f'  <li><a href="{url}">{label}</a></li>' for url, label in links)
+
+
+def build_manual_gpt_prompt(article: NewsArticle, history: dict, tickers: list[str]) -> str:
+    related_posts = find_related_posts(history, {"category": "미국증시"}, tickers)
+    related_text = "\n".join(
+        f"- {post['title']}: {post['url']}" for post in related_posts
+    ) or "- 제공된 과거 글 없음. 아래 카테고리 링크 대체 규칙을 사용하세요."
+    limited_source = is_limited_source(article)
+    quality_score = content_quality_score(article)
+    article_type = classify_article_type(article, tickers)
+    article_type_name = article_type_label(article_type)
+    guide = article_type_guide(article_type)
+    fallback_links = fallback_related_links_html(article_type)
+    limited_source_instruction = (
+        """- 제한적 원문 여부: True
+- 원문이 Premium/부분 공개 기사이거나 본문 데이터가 부족합니다.
+- 얇은 기사 요약문으로 작성하지 마세요. 제목과 공개 요약은 "시드 이슈"로만 사용하세요.
+- 본문에서 "기사 데이터만으로는 확인이 제한됩니다" 같은 방어 문구를 반복하지 마세요.
+- 데이터 한계는 마지막 투자 책임 고지 문단에서 1회만 언급하세요.
+- 확인되지 않은 실적 수치, 목표주가, PER/PBR, EPS, 컨센서스, 애널리스트 의견, 성능 데이터는 절대 만들지 마세요.
+- 일반 기업 소개로 분량을 채우지 말고, 구조적 원가 압박, 거시경제적 밸류에이션 변수, 경쟁 구도, 기술 부채, 기관 투자자의 리스크 점검 프레임워크 중심으로 확장하세요."""
+        if limited_source
+        else
+        """- 제한적 원문 여부: False
+- 원문 본문이 충분하더라도 기사에 없는 재무 수치, 목표주가, 컨센서스, 공시 내용은 만들지 마세요.
+- 단순 요약이 아니라 투자자 관점의 시장 기대치와 mispricing 가능성을 분석하세요.
+- 데이터 한계 문구는 필요할 때 마지막 투자 책임 고지 문단에서만 1회 사용하세요."""
+    )
+
+    return f"""
+당신은 기관투자자(Buy-side) 스타일의 퀀트 기반 재무분석가이자 10년 차 자산운용사 매니저입니다.
+
+목표:
+- 아래 기사 데이터를 바탕으로 구글 검색 상위 노출을 노리는 한국어 Blogger/Tistory용 HTML 글을 작성하세요.
+- 단순 요약이 아니라 시장 기대치 대비 mispricing이 발생한 투자 기회와 위험을 분석하세요.
+- 수집되지 않은 재무 수치, 컨센서스, 목표주가, 애널리스트 의견, 공시 내용은 절대 지어내지 마세요.
+- 본문에서는 방어적인 공백 선언을 반복하지 말고, 데이터 공백이 있으면 기관투자자 분석 프레임워크로 자연스럽게 전환하세요.
+- 인사말, 감탄사, "첫째로", "요약하자면" 같은 진부한 표현 없이 바로 분석으로 들어가세요.
+
+제한적 원문 처리:
+{limited_source_instruction}
+- 글 길이는 공백 제외 최소 2,000자 이상, 가능하면 2,500~3,500자 수준으로 작성하세요.
+- 정보 이득이 낮은 일반론을 피하고, 독자가 투자 판단 전에 점검할 수 있는 구조적 변수와 리스크 프레임워크를 제시하세요.
+
+전문 리서치 문체 규칙:
+- 나쁜 표현: "현재 기사 데이터만으로는 수치 확인이 제한되므로 향후 실적을 봐야 합니다."
+- 좋은 표현: "단기적으로 이 이슈가 가시적인 밸류에이션 리레이팅으로 이어지기 위해서는, 향후 분기 실적(Form 10-Q)에서 고객 이탈률, ARPU, 마진 방어 여부를 추적 관찰해야 합니다."
+- 위 좋은 표현의 톤을 따르되, 기사에 없는 수치를 만들지 마세요.
+
+SEO 제목 작성 규칙:
+- 검색자가 실제로 입력할 만한 키워드를 포함하세요.
+- 단순 기사 제목 번역을 피하세요.
+- 산업 구조, 투자 포인트, 경쟁 구도, 리스크를 반영하세요.
+
+기사 유형별 확장 가이드:
+{guide}
+
+내부 링크 지침:
+- 관련 과거 글이 있으면 하단 목록에만 몰아넣지 말고, 본문 중간 문맥에 자연스러운 앵커 텍스트 링크로 최소 1개 이상 삽입하세요.
+- 관련성이 낮은 글은 억지로 넣지 마세요.
+- 제공된 과거 글이 없으면 부재 안내 문장을 쓰지 말고 아래 카테고리 링크를 사용하세요.
+
+카테고리 대체 링크:
+<h2>📚 함께 보면 좋은 글</h2>
+<ul>
+{fallback_links}
+</ul>
+
+FAQ 스니펫 지침:
+- FAQ 질문은 <h3> 태그로 작성하세요.
+- 답변은 바로 다음 <p>에 배치하고, 2~3문장 이내로 결론부터 명확히 쓰세요.
+- 답변 첫 문장은 "정답 요약:"으로 시작하세요.
+- "아직 모릅니다" 식의 회피형 답변은 피하고, 확인 가능한 범위에서 명확한 결론과 전략적 해석을 제시하세요.
+
+출력:
+- Blogger/Tistory에 바로 붙여넣을 수 있는 HTML만 출력하세요.
+- Markdown 설명, 코드블록, 별도 해설은 출력하지 마세요.
+- 아래 HTML 구조의 모든 섹션을 생략하지 마세요.
+
+HTML 구조:
+<h1>SEO 제목</h1>
+
+<p>이 이슈를 왜 지금 봐야 하는지 시장 기대치와 엮은 강한 도입부 2~3문장</p>
+
+<hr>
+
+<blockquote style="background: #f9f9f9; border-left: 8px solid #007bff; padding: 15px; margin: 20px 0;">
+  📌 <strong>기관 투자자 관점 핵심 3줄 요약</strong><br>
+  • 핵심 포인트 1<br>
+  • 핵심 포인트 2<br>
+  • 핵심 포인트 3
+</blockquote>
+
+<h2>📊 시장 기대치와의 괴리 (Expectation Gap)</h2>
+<p>시장 기대치와 실제 뉴스 사이의 차이를 Fact 중심으로 분석</p>
+
+<h2>🏢 기업의 현재 위치와 경쟁 구도</h2>
+<p>분석 대상 기업이 현재 산업 안에서 어떤 위치에 있는지, 관련 경쟁 구도와 함께 설명</p>
+
+<h2>⚙️ 기술 전략과 원가 구조의 의미 (Technical Strategy & Cost Structure)</h2>
+<p>수치가 부족해도 섹션을 삭제하지 말고, 기사 유형에 맞춰 클라우드 인프라, 기술 부채, 보안 리스크, 공급망, 현금흐름, 자본배분, 비용 구조, 고객 이탈률 같은 구조적 변수를 분석</p>
+
+<h2>❓ 무엇이 가장 중요할까요? (FAQ)</h2>
+<h3>개인 투자자가 검색할 만한 핵심 질문</h3>
+<p><strong>정답 요약:</strong> 구글 추천 스니펫에 적합하도록 2~3문장으로 결론부터 답변</p>
+
+<h2>⚖️ 찬반 논리 점검 (Bull vs Bear Thesis)</h2>
+<ul>
+  <li><strong>상방 모멘텀 (Bull):</strong> 성장 모멘텀 또는 catalyst 중심 긍정 논리</li>
+  <li><strong>하방 리스크 (Bear):</strong> 밸류에이션, 희석, 규제, 수요 둔화 등 반대 논리</li>
+</ul>
+
+<h2>💡 월가의 오판 포인트 (Market Mispricing)</h2>
+<p style="color: #2c3e50; font-weight: bold; background: #f0f7ff; padding: 12px; border-radius: 5px;">시장이 놓치고 있을 수 있는 단 하나의 오판 포인트</p>
+
+<h2>📚 함께 보면 좋은 글</h2>
+<ul>
+  관련 과거 글이 있으면 자연스러운 앵커 링크 삽입
+  제공된 과거 글이 없으면 위 카테고리 대체 링크 사용
+</ul>
+
+<p style="font-size: 0.9em; color: gray; margin-top: 30px;">원본 출처: <a href="{html.escape(article.url)}" target="_blank" rel="noopener noreferrer nofollow">{html.escape(article.source_name)}</a></p>
+
+<br>
+
+<p style="font-size: 0.85em; color: #95a5a6; text-align: center;">※ 본 분석은 의사결정 참고용 데이터입니다. 일부 원문 데이터가 제한적인 경우 최종 투자 판단 전 공식 공시와 실적 자료 확인이 필요하며, 최종 투자 책임은 사용자 본인에게 있습니다.</p>
+
+기사 데이터:
+- 제목: {article.title}
+- 출처: {article.source_name}
+- URL: {article.url}
+- 감지된 티커 후보: {tickers}
+- RSS 요약: {article.rss_summary[:700]}
+- 제한적 원문 여부: {limited_source}
+- 본문 품질 점수: {quality_score}
+- 기사 유형 코드: {article_type}
+- 기사 유형명: {article_type_name}
+- 전처리된 본문: {article.clean_text}
+
+관련 과거 글:
+{related_text}
+""".strip()
+
+
 def run_scheduler() -> None:
     load_dotenv()
     run_time = os.getenv("RUN_TIME_KST", KST_RUN_TIME)

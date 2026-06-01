@@ -102,6 +102,20 @@ class PromptLogicTests(unittest.TestCase):
 
         self.assertEqual(bot.classify_article_type(sample, []), "etf_dividend")
 
+    def test_manual_prompt_uses_non_defensive_seo_structure(self):
+        sample = article(
+            "Microsoft Security Issue Raises Enterprise Risk Questions",
+            "A security issue has raised questions about enterprise software risk.",
+            "Premium Sign in Skip to navigation Enterprise customers are watching cloud security and software reliability.",
+        )
+        prompt = bot.build_manual_gpt_prompt(sample, {"items": []}, ["MSFT"])
+
+        self.assertIn("⚙️ 기술 전략과 원가 구조의 의미", prompt)
+        self.assertIn("데이터 한계는 마지막 투자 책임 고지 문단에서 1회만", prompt)
+        self.assertIn("카테고리 대체 링크", prompt)
+        self.assertIn("rel=\"noopener noreferrer nofollow\"", prompt)
+        self.assertNotIn("관련 과거 글은 아직 없습니다", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

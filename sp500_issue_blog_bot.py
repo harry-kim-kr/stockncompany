@@ -615,6 +615,7 @@ def build_manual_gpt_prompt(article: NewsArticle, history: dict, tickers: list[s
     related_text = "\n".join(
         f"- {post['title']}: {post['url']}" for post in related_posts
     ) or "- 관련 과거 글 없음"
+    is_limited_source = len(article.clean_text.strip()) < 800
 
     return f"""
 당신은 기관투자자(Buy-side) 스타일의 퀀트 기반 재무분석가이자 10년 차 자산운용사 매니저입니다.
@@ -625,6 +626,15 @@ def build_manual_gpt_prompt(article: NewsArticle, history: dict, tickers: list[s
 - 수집되지 않은 재무 수치, 컨센서스, 목표주가, 애널리스트 의견, 공시 내용은 절대 지어내지 마세요.
 - 자료에 없는 내용은 "기사 데이터만으로는 확인이 제한됩니다"라고 표현하세요.
 - 인사말, 감탄사, "첫째로", "요약하자면" 같은 진부한 표현 없이 바로 분석으로 들어가세요.
+
+제한적 원문 처리:
+- 제한적 원문 여부: {is_limited_source}
+- 원문이 Premium/부분 공개 기사이거나 본문 데이터가 부족하면, 얇은 기사 요약문으로 쓰지 마세요.
+- 이 경우 제목과 공개 요약을 "시드 이슈"로만 사용하고, 검증 가능한 일반 산업 지식 중심의 SEO 전략 분석 글로 확장하세요.
+- 예: 인텔 AI 칩/저가 메모리 이슈라면 "인텔 AI 반도체 재도전, 엔비디아 독주를 흔들 수 있을까?"처럼 산업 구조 관점 제목을 잡으세요.
+- 확장 섹션에는 현재 기업 위치, 경쟁사 비교, 시장 구조, 기술/원가 전략의 의미, 투자자가 볼 포인트를 포함하세요.
+- 단, 기사에 없는 최신 수치, 성능 데이터, 매출, EPS, 목표주가, 컨센서스는 절대 만들어내지 마세요.
+- 글 길이는 공백 제외 최소 2,000자 이상, 가능하면 2,500~3,500자 수준으로 작성하세요.
 
 출력:
 - Blogger에 바로 붙여넣을 수 있는 HTML만 출력하세요.
@@ -642,6 +652,10 @@ HTML 구조:
 </blockquote>
 <h2>📊 시장 기대치와의 괴리 (Expectation Gap)</h2>
 <p>시장 기대치와 실제 뉴스 사이의 차이를 Fact 중심으로 분석</p>
+<h2>🏢 기업의 현재 위치와 경쟁 구도</h2>
+<p>분석 대상 기업이 현재 산업 안에서 어떤 위치에 있는지, 엔비디아/AMD/빅테크 등 관련 경쟁 구도와 함께 설명</p>
+<h2>🧠 기술 전략과 원가 구조의 의미</h2>
+<p>AI 추론, 메모리, 칩 설계, 공급망, 비용 구조 등 공개적으로 확인 가능한 산업 논리 중심 분석</p>
 <h2>❓ 무엇이 가장 중요할까요? (FAQ)</h2>
 <p><strong>Q. 개인 투자자가 검색할 만한 핵심 질문</strong></p>
 <p>A. 구글 추천 스니펫에 적합한 2문장 답변</p>
@@ -732,9 +746,12 @@ def process_one_article(
         return False
 
     if is_thin_article(article):
-        metrics.skipped_thin_articles += 1
-        logging.info("Skipping thin article before OpenAI call: %s", article.title)
-        return False
+        if os.getenv("MANUAL_PROMPT_MODE", "false").lower() == "true" and article.rss_summary.strip():
+            logging.info("Thin article accepted for manual prompt mode: %s", article.title)
+        else:
+            metrics.skipped_thin_articles += 1
+            logging.info("Skipping thin article before OpenAI call: %s", article.title)
+            return False
 
     seen_cache.add(article_cache_key(article))
     tickers = detect_tickers(article)

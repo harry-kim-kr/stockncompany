@@ -114,7 +114,28 @@ class PromptLogicTests(unittest.TestCase):
         self.assertIn("데이터 한계는 마지막 투자 책임 고지 문단에서 1회만", prompt)
         self.assertIn("카테고리 대체 링크", prompt)
         self.assertIn("rel=\"noopener noreferrer nofollow\"", prompt)
+        self.assertIn("<strong>핵심 키워드</strong>:", prompt)
+        self.assertIn("정답 요약 문단은 정확히 1~2문장", prompt)
+        self.assertIn("<ol>", prompt)
+        self.assertIn("line-height: 1.5", prompt)
         self.assertNotIn("관련 과거 글은 아직 없습니다", prompt)
+
+    def test_tsmc_ai_win_classifies_manufacturing_with_healthcare_secondary(self):
+        sample = article(
+            "Nvidia Lands Major TSMC AI Win",
+            "Nvidia AI is being used by TSMC for lithography and process simulation, while Foxconn is applying AI agent systems in medical centers.",
+            "TSMC lithography process simulation fab operations defect inspection yield digital twin. "
+            "Foxconn medical centers AI agent systems clinicians healthcare workflow automation.",
+        )
+        primary, secondary = bot.classify_article_topics(sample, ["NVDA"])
+        prompt = bot.build_manual_gpt_prompt(sample, {"items": []}, ["NVDA"])
+
+        self.assertEqual(primary, "ai_manufacturing")
+        self.assertEqual(secondary, "ai_healthcare")
+        self.assertIn("primary_topic: ai_manufacturing", prompt)
+        self.assertIn("secondary_topic: ai_healthcare", prompt)
+        self.assertIn("AI가 제조공정과 산업현장으로 확산되는 사례", prompt)
+        self.assertIn("TSMC가 엔비디아 AI를 공장에 도입한 이유", prompt)
 
 
 if __name__ == "__main__":

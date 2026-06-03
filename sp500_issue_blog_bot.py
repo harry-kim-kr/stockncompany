@@ -2046,6 +2046,323 @@ HTML 구조:
 """.strip()
 
 
+def investor_concerns_for_topic(article_type: str, secondary_topic: str | None = None) -> str:
+    concerns = {
+        "etf_dividend": [
+            "배당률이 높은데 원금 손실은 괜찮은가?",
+            "지금 보유해야 하나, 손절해야 하나?",
+            "추가 매수하면 배당으로 손실을 회복할 수 있는가?",
+            "배당이 실제 수익인지 자본 반환인지 어떻게 구분해야 하는가?",
+        ],
+        "ai_semiconductor": [
+            "이미 많이 오른 AI 반도체 종목을 지금 사도 되는가?",
+            "이번 뉴스가 단기 테마인지 장기 성장 동력인지 어떻게 판단해야 하는가?",
+            "엔비디아, AMD, 인텔, TSMC, 퀄컴 중 실제 수혜 기업은 어디인가?",
+            "데이터센터 외 신규 시장이 실제 실적에 반영될 수 있는가?",
+        ],
+        "ai_manufacturing": [
+            "AI가 반도체 공정 생산성을 실제로 높일 수 있는가?",
+            "TSMC 같은 파운드리의 수율 개선이 엔비디아 투자 논리를 강화하는가?",
+            "GPU 판매가 아니라 제조공정 AI 확산으로 TAM이 넓어지는가?",
+            "제조 CAPEX 절감과 생산성 향상이 실적에 언제 반영될 수 있는가?",
+        ],
+        "ai_enterprise": [
+            "AI Agent가 실제 기업 생산성 향상으로 이어질 수 있는가?",
+            "기업 고객이 AI 기능에 추가 비용을 지불할 의지가 있는가?",
+            "AI 도입이 클라우드 사용량과 SaaS ARPU를 높일 수 있는가?",
+            "보안, 규제, 도입 비용이 확산 속도를 늦출 수 있는가?",
+        ],
+        "ai_healthcare": [
+            "의료 AI Agent가 병원 현장에서 실제로 채택될 수 있는가?",
+            "임상의 업무 보조가 생산성 개선과 비용 절감으로 이어지는가?",
+            "환자 데이터 보안과 규제 리스크는 어느 정도인가?",
+            "헬스케어 AI가 단기 테마인지 장기 산업 침투인지 어떻게 판단할까?",
+        ],
+        "bigtech": [
+            "리스크 뉴스에도 주가가 오르는 이유는 무엇인가?",
+            "빅테크의 AI CAPEX가 장기 성장으로 이어질 수 있는가?",
+            "규제, 보안, 독점 이슈가 밸류에이션을 훼손할 수 있는가?",
+            "이미 보유 중인 빅테크 주식을 계속 가져가도 되는가?",
+        ],
+        "cashflow_value": [
+            "현금이 많은 기업이 정말 좋은 투자처인가?",
+            "자유현금흐름이 좋아도 주가가 부진한 이유는 무엇인가?",
+            "자사주 매입과 배당 중 무엇이 더 중요한가?",
+            "기업의 자본배분 능력을 어떻게 판단해야 하는가?",
+        ],
+        "consumer_cyclical": [
+            "경기 둔화에도 이 기업의 수요가 유지될 수 있는가?",
+            "금리와 소비 위축이 실적에 얼마나 영향을 주는가?",
+            "브랜드 파워와 가격 전가력이 실제로 작동하는가?",
+            "지금은 저가 매수 기회인가, 구조적 둔화의 시작인가?",
+        ],
+    }
+    items = concerns.get(article_type, [
+        "이 뉴스가 기존 투자 논리를 강화하는가, 약화하는가?",
+        "이미 보유한 투자자는 무엇을 확인해야 하는가?",
+        "신규 진입을 고민하는 투자자는 어떤 리스크를 먼저 봐야 하는가?",
+    ])
+    if secondary_topic and secondary_topic in concerns:
+        items = items + concerns[secondary_topic][:2]
+    return "\n".join(f"- {item}" for item in items)
+
+
+def risk_guide_for_topic(article_type: str) -> str:
+    risks = {
+        "etf_dividend": "- NAV 훼손\n- 배당 착시\n- 총수익률 부진\n- 자본 반환(ROC)\n- 주식 병합",
+        "ai_semiconductor": "- 기대가 이미 주가에 반영된 밸류에이션 부담\n- 고객 채택률 부진\n- 데이터센터 외 시장의 실적 반영 지연\n- 경쟁사의 가격 방어 전략\n- 공급망 병목",
+        "ai_manufacturing": "- 수율 개선 효과의 실적 반영 지연\n- 제조 현장 도입 속도 부진\n- 파운드리 고객 집중 리스크\n- 공정 자동화 ROI 검증 부족\n- 제조 CAPEX 절감 기대 과대평가",
+        "ai_enterprise": "- 기업 고객 도입 지연\n- 보안 비용 증가\n- AI 기능의 가격 전가 실패\n- 기존 워크플로우와의 통합 비용\n- Churn Risk",
+        "ai_healthcare": "- 의료 데이터 보안\n- 규제 승인과 책임 소재\n- 병원 시스템 통합 지연\n- 임상의 채택 저항\n- 단기 매출화 지연",
+        "bigtech": "- 고객 신뢰 훼손\n- 규제 조사\n- 보안 비용 증가\n- 엔터프라이즈 계약 지연\n- 플랫폼 락인 약화",
+        "cashflow_value": "- 낮은 ROIC\n- 비효율적 M&A\n- 성장 없는 현금 보유\n- 자사주 매입 타이밍 실패\n- 경기민감 현금흐름 착시",
+        "consumer_cyclical": "- 재고 부담\n- 수요 둔화\n- 금리 민감도\n- 가격 전가력 약화\n- 브랜드 프리미엄 훼손",
+    }
+    return risks.get(article_type, "- 실적 반영 지연\n- 밸류에이션 부담\n- 경쟁 구도 변화\n- 규제 또는 수요 리스크")
+
+
+def title_templates_for_topic(article_type: str) -> str:
+    templates = {
+        "etf_dividend": "- OO ETF 괜찮을까? 배당률보다 먼저 봐야 할 핵심 리스크\n- OO 고배당 ETF, 배당은 높은데 왜 원금이 줄어들까?\n- OO ETF 보유해도 될까? 총수익률과 NAV 훼손 분석",
+        "ai_semiconductor": "- OO 신제품이 중요한 이유, 지금 투자자가 확인해야 할 핵심 변수\n- OO 주가 이미 많이 올랐는데 지금 사도 될까? AI 성장성과 리스크 분석\n- OO와 OO 경쟁 구도, 실제 수혜 기업은 어디일까?",
+        "ai_manufacturing": "- TSMC가 엔비디아 AI를 공장에 도입한 이유, 반도체 수율 경쟁이 시작됐다\n- AI는 이제 반도체 공장을 운영한다: 엔비디아와 TSMC 협력의 진짜 의미\n- 엔비디아 AI가 GPU 판매를 넘어 제조공정으로 확산되는 이유",
+        "ai_enterprise": "- AI Agent는 실제 기업 생산성을 바꿀까? 투자자가 봐야 할 체크포인트\n- OO AI 기능, 단기 테마인가 엔터프라이즈 성장 동력인가?\n- AI 소프트웨어 확산이 클라우드 실적에 반영되는 조건",
+        "ai_healthcare": "- 의료 AI Agent는 병원 현장을 바꿀까? 투자자가 봐야 할 리스크\n- AI 헬스케어 시장, 단기 테마와 장기 침투율을 구분하는 법\n- 의료 AI 도입이 실제 매출로 연결되기 위한 조건",
+        "bigtech": "- OO 리스크에도 주가가 오른 이유, 시장은 무엇을 보고 있나?\n- OO 보유해도 될까? AI CAPEX와 규제 리스크를 함께 보는 법\n- OO 주가 상승의 진짜 이유, 단기 뉴스보다 중요한 구조적 변수",
+        "cashflow_value": "- 현금흐름이 좋은 기업이 반드시 좋은 투자일까? FCF와 자본배분의 함정\n- 현금 많은 기업에 투자하면 안전할까? 기관투자자가 FCF를 보는 이유\n- OO 주식, 현금흐름은 좋은데 왜 시장 평가는 낮을까?",
+    }
+    return templates.get(article_type, "- OO 뉴스 이후 투자자는 무엇을 판단해야 할까?\n- OO 주식 지금 봐야 할 핵심 리스크와 기회\n- 단기 뉴스보다 중요한 투자 체크포인트")
+
+
+def image_suggestions_for_topic(article_type: str) -> str:
+    suggestions = {
+        "etf_dividend": "1. 배당률 vs 총수익률 비교 차트\n2. NAV 추세 이미지\n3. ETF 구조 설명 이미지\n4. 분배금과 자본 반환(ROC) 구조도",
+        "ai_semiconductor": "1. AI 반도체 공급망 구조도\n2. 엔비디아/AMD/인텔/TSMC 경쟁 구도\n3. 데이터센터 외 TAM 확장 지도\n4. AI 칩 밸류체인 이미지",
+        "ai_manufacturing": "1. 반도체 공정 AI 적용 구조도\n2. Lithography/수율/결함검사 흐름도\n3. TSMC-엔비디아 제조공정 협력 지도\n4. 제조 CAPEX 절감 구조도",
+        "ai_enterprise": "1. AI Agent 업무 자동화 흐름도\n2. 클라우드/SaaS 수익화 구조도\n3. 기업 고객 도입 리스크 맵",
+        "ai_healthcare": "1. 의료 AI Agent 워크플로우\n2. 병원/임상의/환자 데이터 흐름도\n3. 헬스케어 AI 규제 리스크 맵",
+        "bigtech": "1. 플랫폼 구조도\n2. AI CAPEX와 수익화 연결 지도\n3. 규제/보안 리스크 맵",
+        "cashflow_value": "1. FCF 사용처 흐름도\n2. 자본배분 구조도\n3. 자사주 매입과 배당 비교 이미지",
+    }
+    return suggestions.get(article_type, "1. 투자 리스크 구조도\n2. 경쟁 구도 표 이미지\n3. 핵심 체크리스트 이미지")
+
+
+def cony_style_instruction(article_type: str) -> str:
+    if article_type != "etf_dividend":
+        return ""
+    return """
+ETF/배당/고위험 인컴 상품은 CONY형 구조를 우선 적용하세요:
+- [경험/문제 제기] 왜 이 상품이 관심을 받는가?
+- [본질 정의] 이 상품의 진짜 정체는 무엇인가?
+- [겉으로 보이는 매력] 배당, 분배금, 월수입, 고수익률
+- [숨겨진 리스크] NAV 훼손, ROC, 주식 병합, 총수익률 부진
+- [투자자별 적합성] 누구에게 맞고 누구에게 맞지 않는가?
+- [행동 기준] 보유 / 신규 진입 / 추가매수 / 손절 기준
+- [공식 자료 링크]
+""".strip()
+
+
+def build_manual_gpt_prompt(article: NewsArticle, history: dict, tickers: list[str]) -> str:
+    related_posts = find_related_posts(history, {"category": "미국증시"}, tickers)
+    related_text = "\n".join(
+        f"- {post['title']}: {post['url']}" for post in related_posts
+    ) or "- 제공된 과거 글 없음. 아래 카테고리 링크 대체 규칙을 사용하세요."
+    limited_source = is_limited_source(article)
+    quality_score = content_quality_score(article)
+    primary_topic, secondary_topic = classify_article_topics(article, tickers)
+    primary_topic_name = article_type_label(primary_topic)
+    secondary_topic_name = article_type_label(secondary_topic) if secondary_topic else "없음"
+    guide = article_type_guide(primary_topic)
+    if secondary_topic:
+        guide = f"{guide}\n\n보조 주제 확장 가이드:\n{article_type_guide(secondary_topic)}"
+    fallback_links = fallback_related_links_html(primary_topic)
+    concerns = investor_concerns_for_topic(primary_topic, secondary_topic)
+    risk_guide = risk_guide_for_topic(primary_topic)
+    title_templates = title_templates_for_topic(primary_topic)
+    image_suggestions = image_suggestions_for_topic(primary_topic)
+    cony_instruction = cony_style_instruction(primary_topic)
+    limited_source_instruction = (
+        """- 제한적 원문 여부: True
+- 원문이 Premium/부분 공개 기사이거나 본문 데이터가 부족합니다.
+- 얇은 기사 요약문으로 작성하지 마세요. 제목과 공개 요약은 "시드 이슈"로만 사용하세요.
+- 본문에서 방어 문구를 반복하지 말고, 데이터 한계는 마지막 투자 책임 고지 문단에서 1회만 언급하세요.
+- 전체 글 분량 비율은 기사 요약 10% 이하, 산업 구조 분석 40%, 투자 프레임워크 30%, Bull/Bear/Mispricing 20%로 작성하세요.
+- 확인되지 않은 실적 수치, 목표주가, PER/PBR, EPS, 컨센서스, 애널리스트 의견, 성능 데이터는 절대 만들지 마세요.
+- 일반 기업 소개로 분량을 채우지 말고, primary_topic과 secondary_topic에 맞는 독자 고민, 산업 침투율, 생산성, 비용 구조, 규제 리스크, TAM 확장 프레임워크로 확장하세요."""
+        if limited_source
+        else
+        """- 제한적 원문 여부: False
+- 원문 본문이 충분하더라도 기사에 없는 재무 수치, 목표주가, 컨센서스, 공시 내용은 만들지 마세요.
+- 단순 요약이 아니라 투자자 관점의 시장 기대치와 mispricing 가능성을 분석하세요.
+- 데이터 한계 문구는 필요할 때 마지막 투자 책임 고지 문단에서만 1회 사용하세요."""
+    )
+
+    return f"""
+당신은 기관투자자(Buy-side) 스타일의 퀀트 기반 재무분석가이자 10년 차 자산운용사 매니저입니다.
+
+당신의 글은 단순 뉴스 해설이 아니라, 이 뉴스를 검색한 개인 투자자의 실제 고민을 해결하는 투자 판단형 콘텐츠여야 합니다.
+모든 글은 다음 질문에 답해야 합니다.
+- 이미 이 종목을 보유한 투자자는 무엇을 해야 하는가?
+- 신규 진입을 고민하는 투자자는 무엇을 확인해야 하는가?
+- 단기 트레이더와 장기 투자자의 관점은 어떻게 다른가?
+- 이 뉴스가 기존 투자 논리를 강화하는가, 약화하는가?
+
+목표:
+- 아래 기사 데이터를 바탕으로 구글 검색 상위 노출을 노리는 한국어 Blogger/Tistory용 HTML 글을 작성하세요.
+- 기존 흐름인 "뉴스 발생 → 산업 구조 분석"에 머물지 말고, "독자의 투자 고민 → 뉴스의 의미 → 구조 분석 → 투자자별 행동 기준 → 체크리스트" 순서로 작성하세요.
+- 수집되지 않은 재무 수치, 컨센서스, 목표주가, 애널리스트 의견, 공시 내용은 절대 지어내지 마세요.
+- AI 기사는 GPU/데이터센터 일반론으로 자동 확장하지 말고, primary_topic과 secondary_topic이 가리키는 실제 침투 영역을 중심으로 작성하세요.
+- 인사말, 감탄사, "첫째로", "요약하자면" 같은 진부한 표현 없이 바로 분석으로 들어가세요.
+
+제한적 원문 처리:
+{limited_source_instruction}
+- 글 길이는 공백 제외 최소 2,000자 이상, 가능하면 2,500~3,500자 수준으로 작성하세요.
+
+이 글을 검색한 독자의 핵심 고민:
+{concerns}
+
+도입부 작성 규칙:
+- 도입부는 산업 해설이 아니라 이미 보유한 투자자, 신규 진입 투자자, 손실 중인 투자자, 고점 추격 매수 투자자, 배당/테마 수익 기대 투자자의 고민 중 하나로 시작하세요.
+- 예: 이미 NVDA를 보유한 투자자라면 이번 뉴스를 단순 신제품 뉴스로 볼지, 데이터센터 의존도를 낮추는 장기 성장 옵션으로 볼지 고민할 수 있습니다.
+- 예: 고배당 ETF를 보유한 투자자라면 매달 들어오는 분배금이 실제 수익인지, 원금 훼손을 가리는 착시인지 반드시 구분해야 합니다.
+
+제목 생성 규칙:
+- 제목은 "무슨 일이 있었나?"보다 "투자자는 무엇을 판단해야 하나?"에 가깝게 작성하세요.
+- 뉴스 제목 번역형 제목을 피하고, 투자자 검색 질문형 제목을 우선하세요.
+기사 유형별 제목 템플릿:
+{title_templates}
+
+기사 유형별 확장 가이드:
+{guide}
+
+기사 유형별 리스크 구체화:
+{risk_guide}
+
+{cony_instruction}
+
+개인 투자자 접근법 작성 규칙:
+- 반드시 보유자, 신규 진입자, 단기 트레이더, 장기 투자자를 분리하세요.
+- 기사 유형별로 문장을 구체화하세요.
+- ETF/배당 기사라면 총수익률, NAV 훼손, ROC, 추가매수/손절 기준을 우선하세요.
+- AI/반도체 기사라면 신제품 발표보다 실제 고객 채택률, 실적 기여 시점, 밸류에이션 부담을 우선하세요.
+- 빅테크 보안 기사라면 보안 비용, 고객 신뢰, 규제 리스크, 플랫폼 락인을 우선하세요.
+
+투자 판단 체크리스트 작성 규칙:
+- 체크리스트는 기사 유형별로 구체화하세요.
+- CONY/ETF형 글은 총수익률, NAV 추세, ROC, 주식 병합, 분배금 지속 가능성을 포함하세요.
+- AI PC/AI 반도체형 글은 고객 채택률, 실적 기여 시점, 경쟁사 대응, 교체 수요, 밸류에이션 부담을 포함하세요.
+- 현금흐름/가치주형 글은 FCF, ROIC, 자본배분, 자사주 매입 타이밍, 성장성 부족 리스크를 포함하세요.
+
+가독성 및 리스트 작성 규칙:
+- <li> 항목은 평문으로 시작하지 말고 반드시 <strong>핵심 키워드</strong>: 형식으로 시작하세요.
+- 경쟁 구도, 구조적 변수, 투자 체크포인트처럼 순서와 인과관계가 중요한 영역은 <ul>보다 <ol>을 우선 사용하세요.
+
+내부 링크 지침:
+- 관련 과거 글이 있으면 본문 중간 문맥에 자연스러운 앵커 텍스트 링크로 최소 1개 이상 삽입하세요.
+- 제공된 과거 글이 없으면 부재 안내 문장을 쓰지 말고 아래 카테고리 링크를 사용하세요.
+
+카테고리 대체 링크:
+<h2>📚 함께 보면 좋은 글</h2>
+<ul>
+{fallback_links}
+</ul>
+
+FAQ 스니펫 지침:
+- FAQ 질문은 <h3> 태그로 작성하세요.
+- 첫 번째 답변 문단은 바로 다음 <p><strong>정답 요약:</strong> ...</p>에 배치하세요.
+- 정답 요약 문단은 정확히 1~2문장, 가능하면 30단어 이하로 직접적인 결론만 담으세요.
+- 보충 논리, 배경, 추적 지표는 반드시 바로 아래 별도 <p> 문단으로 분리하세요.
+
+출력:
+- Blogger/Tistory에 바로 붙여넣을 수 있는 HTML만 출력하세요.
+- Markdown 설명, 코드블록, 별도 해설은 출력하지 마세요.
+- 아래 HTML 구조의 모든 섹션을 생략하지 마세요.
+
+HTML 구조:
+<h1>SEO 제목</h1>
+<p>이 글을 검색한 투자자의 고민과 뉴스의 의미를 연결한 도입부 2~3문장</p>
+<hr>
+<blockquote style="background: #f9f9f9; border-left: 8px solid #007bff; padding: 15px; margin: 20px 0;">
+  📌 <strong>기관 투자자 관점 핵심 3줄 요약</strong><br>
+  • 핵심 포인트 1<br>
+  • 핵심 포인트 2<br>
+  • 핵심 포인트 3
+</blockquote>
+<h2>🔎 이 글을 검색한 투자자의 핵심 고민</h2>
+<ul>
+  <li><strong>고민 1</strong>: 기사 유형에 맞는 실제 투자 고민</li>
+  <li><strong>고민 2</strong>: 보유/신규진입/손절/추가매수 관련 고민</li>
+  <li><strong>고민 3</strong>: 리스크 또는 기회 관련 고민</li>
+</ul>
+<h2>📊 시장 기대치와의 괴리 (Expectation Gap)</h2>
+<p>시장 기대치와 실제 뉴스 사이의 차이를 Fact 중심으로 분석</p>
+<h2>🏢 기업의 현재 위치와 경쟁 구도</h2>
+<p>분석 대상 기업이 현재 산업 안에서 어떤 위치에 있는지, 관련 경쟁 구도와 함께 설명</p>
+<h2>⚙️ 기술 전략과 원가 구조의 의미 (Technical Strategy & Cost Structure)</h2>
+<ol>
+  <li><strong>구조적 비용 변수</strong>: 기사 유형에 맞는 비용 또는 효율성 레버를 설명</li>
+  <li><strong>마진 민감도</strong>: 수율, 자동화, 기술 부채, 고객 이탈률, CAPEX 감가상각 등 마진에 영향을 주는 변수를 설명</li>
+  <li><strong>투자자 체크포인트</strong>: 향후 실적 또는 공시에서 추적할 지표를 설명</li>
+</ol>
+<h2>🧭 개인 투자자는 어떻게 접근해야 할까?</h2>
+<ul>
+  <li><strong>이미 보유한 투자자</strong>: 이번 뉴스가 기존 투자 논리를 강화하는지, 약화하는지 판단한다.</li>
+  <li><strong>신규 진입을 고민하는 투자자</strong>: 뉴스 직후 추격 매수보다 실적 반영 가능성과 밸류에이션 부담을 함께 확인한다.</li>
+  <li><strong>단기 트레이더</strong>: 뉴스 모멘텀, 수급, 기대감 반영 속도를 중심으로 접근한다.</li>
+  <li><strong>장기 투자자</strong>: 구조적 성장 시장인지 일시적 테마인지 구분한다.</li>
+</ul>
+<h2>❓ 무엇이 가장 중요할까요? (FAQ)</h2>
+<h3>개인 투자자가 검색할 만한 핵심 질문</h3>
+<p><strong>정답 요약:</strong> 구글 추천 스니펫에 적합하도록 1~2문장으로 결론만 답변</p>
+<p>보충 논리와 추적해야 할 지표를 별도 문단으로 설명</p>
+<h2>⚖️ 찬반 논리 점검 (Bull vs Bear Thesis)</h2>
+<ul>
+  <li><strong>상방 모멘텀 (Bull)</strong>: 성장 모멘텀 또는 catalyst 중심 긍정 논리</li>
+  <li><strong>하방 리스크 (Bear)</strong>: 밸류에이션, 희석, 규제, 수요 둔화 등 반대 논리</li>
+</ul>
+<h2>💡 월가의 오판 포인트 (Market Mispricing)</h2>
+<p style="color: #2c3e50; font-weight: bold; background: #f0f7ff; padding: 12px; border-radius: 5px;">현재 시장의 가정 → 실제 가능성 → 맞을 경우 수혜 → 틀릴 경우 리스크 구조로 작성</p>
+<h2>✅ 투자 판단 전 체크리스트</h2>
+<ul>
+  <li><strong>체크포인트 1</strong>: 기사 유형별 핵심 확인 사항</li>
+  <li><strong>체크포인트 2</strong>: 실적 또는 공시에서 확인할 사항</li>
+  <li><strong>체크포인트 3</strong>: 리스크 관리 기준</li>
+</ul>
+<h2>📚 함께 보면 좋은 글</h2>
+<ul>
+  관련 과거 글이 있으면 자연스러운 앵커 링크 삽입
+  제공된 과거 글이 없으면 카테고리 대체 링크 사용
+</ul>
+<div style="font-size: 0.9em; color: #6b7280; margin-top: 30px; text-align: right;">
+  원본 출처: <a href="{html.escape(article.url)}" target="_blank" rel="noopener noreferrer nofollow">{html.escape(article.source_name)}</a>
+</div>
+<br>
+<div style="background: #f8fafc; color: #64748b; font-size: 0.8em; line-height: 1.5; text-align: center; padding: 12px; border-radius: 6px; margin-top: 12px;">
+  ※ 본 분석은 의사결정 참고용 데이터입니다. 일부 원문 데이터가 제한적인 경우 최종 투자 판단 전 공식 공시와 실적 자료 확인이 필요하며, 최종 투자 책임은 사용자 본인에게 있습니다.
+</div>
+<!-- 이미지 제안:
+{image_suggestions}
+-->
+
+기사 데이터:
+- 제목: {article.title}
+- 출처: {article.source_name}
+- URL: {article.url}
+- 감지된 티커 후보: {tickers}
+- RSS 요약: {article.rss_summary[:700]}
+- 제한적 원문 여부: {limited_source}
+- 본문 품질 점수: {quality_score}
+- primary_topic: {primary_topic}
+- primary_topic_name: {primary_topic_name}
+- secondary_topic: {secondary_topic or "없음"}
+- secondary_topic_name: {secondary_topic_name}
+- 전처리된 본문: {article.clean_text}
+
+관련 과거 글:
+{related_text}
+""".strip()
+
+
 def run_scheduler() -> None:
     load_dotenv()
     run_time = os.getenv("RUN_TIME_KST", KST_RUN_TIME)

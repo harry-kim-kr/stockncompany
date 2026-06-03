@@ -134,8 +134,26 @@ class PromptLogicTests(unittest.TestCase):
         self.assertEqual(secondary, "ai_healthcare")
         self.assertIn("primary_topic: ai_manufacturing", prompt)
         self.assertIn("secondary_topic: ai_healthcare", prompt)
-        self.assertIn("AI가 제조공정과 산업현장으로 확산되는 사례", prompt)
+        self.assertIn("AI 기사는 GPU/데이터센터 일반론으로 자동 확장하지 말고", prompt)
+        self.assertIn("primary_topic과 secondary_topic", prompt)
         self.assertIn("TSMC가 엔비디아 AI를 공장에 도입한 이유", prompt)
+
+    def test_prompt_is_investor_decision_oriented(self):
+        sample = article(
+            "CONY ETF Dividend Risk",
+            "The ETF pays high distributions but investors are concerned about NAV erosion and total return.",
+            "Covered call ETF distribution yield NAV erosion ROC reverse split total return income fund.",
+        )
+        prompt = bot.build_manual_gpt_prompt(sample, {"items": []}, ["CONY"])
+
+        self.assertIn("투자 판단형 콘텐츠", prompt)
+        self.assertIn("이 글을 검색한 독자의 핵심 고민", prompt)
+        self.assertIn("배당률이 높은데 원금 손실은 괜찮은가?", prompt)
+        self.assertIn("개인 투자자는 어떻게 접근해야 할까?", prompt)
+        self.assertIn("투자 판단 전 체크리스트", prompt)
+        self.assertIn("CONY형 구조", prompt)
+        self.assertIn("NAV 훼손", prompt)
+        self.assertIn("<!-- 이미지 제안:", prompt)
 
 
 if __name__ == "__main__":
